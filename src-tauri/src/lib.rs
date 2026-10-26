@@ -762,9 +762,7 @@ const INPUT_MONITORING_PANE: &str = "x-apple.systempreferences:com.apple.prefere
 
 /// Called from the input thread when Input Monitoring is still missing after the system request.
 pub(crate) fn explain_input_monitoring(app: &AppHandle) {
-    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-    let korean = read_store(app)["locale"].as_str().map_or(true, |l| l == "kr");
-    let (title, body, open, later) = if korean {
+    let (title, body, open, later) = if korean_ui(app) {
         (
             "입력 모니터링 권한이 필요합니다",
             "Wuwa Tappo가 키 입력과 클릭을 세려면 입력 모니터링 권한이 필요합니다.\n\n\
@@ -786,6 +784,19 @@ pub(crate) fn explain_input_monitoring(app: &AppHandle) {
             "Later",
         )
     };
+    if front_dialog(app, title, body, open, later) {
+        let _ = std::process::Command::new("open").arg(INPUT_MONITORING_PANE).status();
+    }
+}
+
+fn korean_ui(app: &AppHandle) -> bool {
+    read_store(app)["locale"].as_str().map_or(true, |l| l == "kr")
+}
+
+/// Two-button alert brought to the front; true when the first button is chosen. Blocks, so call
+/// it off the main thread.
+fn front_dialog(app: &AppHandle, title: &str, body: &str, ok: &str, cancel: &str) -> bool {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
     // A Dock-less (accessory) app is never frontmost, so its alert would open behind other windows.
     let _ = app.run_on_main_thread(|| {
         if let Some(mtm) = objc2::MainThreadMarker::new() {
@@ -793,15 +804,76 @@ pub(crate) fn explain_input_monitoring(app: &AppHandle) {
             objc2_app_kit::NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
         }
     });
-    let open_settings = app
-        .dialog()
+    app.dialog()
         .message(body)
         .title(title)
         .kind(MessageDialogKind::Info)
-        .buttons(MessageDialogButtons::OkCancelCustom(open.into(), later.into()))
-        .blocking_show();
-    if open_settings {
-        let _ = std::process::Command::new("open").arg(INPUT_MONITORING_PANE).status();
+        .buttons(MessageDialogButtons::OkCancelCustom(ok.into(), cancel.into()))
+        .blocking_show()
+}
+
+// ---------- update notice ----------
+
+/// Kuro's release manifest (what the official app's updater reads). The Windows updater cannot
+/// install on macOS, so a newer version only produces a notice to rebuild with tools/build.sh.
+const RELEASE_HOST_JSON: &str =
+    "https://wutheringwaves-wuwatappo.kurogames-global.com/app/json-host/latest-global_host.json";
+const KURO_ASSETS_PREFIX: &str = "https://wutheringwaves-wuwatappo.kurogames-global.com/";
+const REPO_URL: &str = "https://github.com/atimevil/wuwa-tappo-mac";
+
+fn fetch_json(url: &str) -> Option<Value> {
+    let out = std::process::Command::new("/usr/bin/curl")
+        .args(["-fsSL", "--max-time", "15", url])
+        .output()
+        .ok()?;
+    out.status.success().then(|| serde_json::from_slice(&out.stdout).ok()).flatten()
+}
+
+fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = v.trim().split('.').map(|p| p.parse::<u64>().ok());
+    Some((parts.next()??, parts.next()??, parts.next()??))
+}
+
+fn is_newer(latest: &str, current: &str) -> bool {
+    matches!((parse_version(latest), parse_version(current)), (Some(l), Some(c)) if l > c)
+}
+
+pub(crate) fn notify_if_update_available(app: &AppHandle) {
+    let Some(host) = fetch_json(RELEASE_HOST_JSON) else { return };
+    let Some(manifest_url) = host["url"].as_str().filter(|u| u.starts_with(KURO_ASSETS_PREFIX)) else { return };
+    let Some(manifest) = fetch_json(manifest_url) else { return };
+    let Some(latest) = manifest["version"].as_str().map(str::to_string) else { return };
+    let current = app.package_info().version.to_string();
+    if !is_newer(&latest, &current) || read_store(app)["update_notified"].as_str() == Some(latest.as_str()) {
+        return;
+    }
+    log::info!("[update] Kuro released {latest} (this build: {current})");
+    let _ = update_store(app, |v| v["update_notified"] = json!(latest));
+    let (title, body, open, close) = if korean_ui(app) {
+        (
+            "새 버전이 나왔습니다".to_string(),
+            format!(
+                "Wuwa Tappo {latest}이(가) 나왔습니다. 지금 앱은 {current}입니다.\n\n\
+                 macOS용은 자동으로 업데이트되지 않습니다. 저장소 폴더에서 tools/build.sh를 \
+                 다시 실행하면 새 버전을 받아 다시 빌드합니다."
+            ),
+            "GitHub 열기",
+            "닫기",
+        )
+    } else {
+        (
+            "A new version is available".to_string(),
+            format!(
+                "Wuwa Tappo {latest} has been released. This app is {current}.\n\n\
+                 The macOS build does not update itself. Run tools/build.sh again in the \
+                 repository folder to download and rebuild the new version."
+            ),
+            "Open GitHub",
+            "Close",
+        )
+    };
+    if front_dialog(app, &title, &body, open, close) {
+        let _ = std::process::Command::new("open").arg(REPO_URL).status();
     }
 }
 
@@ -975,7 +1047,11 @@ pub fn run() {
                 .menu(&menu)
                 .build(app)?;
             app.on_menu_event(|app, event| on_menu(app, event.id().as_ref()));
-            input::spawn(handle);
+            input::spawn(handle.clone());
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(20));
+                notify_if_update_available(&handle);
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1039,6 +1115,15 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::Rect;
+
+    #[test]
+    fn version_comparison() {
+        assert!(super::is_newer("1.0.1", "1.0.0"));
+        assert!(super::is_newer("1.10.0", "1.9.9"));
+        assert!(!super::is_newer("1.0.0", "1.0.0"));
+        assert!(!super::is_newer("0.9.0", "1.0.0"));
+        assert!(!super::is_newer("garbage", "1.0.0"));
+    }
 
     #[test]
     fn rect_hit_is_half_open() {

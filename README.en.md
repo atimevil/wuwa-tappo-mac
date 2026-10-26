@@ -78,7 +78,9 @@ The Windows app is a Tauri 2 app. Its frontend (Vue) is compressed inside the ex
 
 ## When a new version comes out
 
-Run `tools/build.sh` again to rebuild with the latest installer. If a patch or the contract check fails, the frontend code has changed. Update the anchor strings in `tools/patch_frontend.py` and the command list in `src-tauri/src/lib.rs` to match the new version.
+The macOS app does not update itself, because Kuro's update files are Windows installers. Instead, at startup the app checks Kuro's release manifest and, when a newer version exists, shows a notice once per version. Run `tools/build.sh` again then to rebuild with the latest installer. Until then the existing app keeps working for as long as the server accepts it.
+
+The patches locate their targets with regular expressions that tolerate renamed minified identifiers, so most new versions build as is. If a patch reports "NOT FOUND" or the contract check fails, the structure of the frontend code has changed. Update the patterns in `tools/patch_frontend.py` and the command list in `src-tauri/src/lib.rs` to match the new version.
 
 ## Checks
 

@@ -65,7 +65,7 @@ PY
 fi
 
 echo "==> extracting frontend from $(basename "$EXE")"
-python3 -I tools/extract_payload.py "$EXE" "$WORK/inner.exe"
+python3 -I tools/extract_payload.py "$EXE" "$WORK/inner.exe" "$WORK/version.txt"
 7zz x -y -o"$WORK/nsis" "$WORK/inner.exe" WuwaTappo.exe >/dev/null
 rm -rf web && mkdir web
 python3 -I tools/extract_assets.py "$WORK/nsis/WuwaTappo.exe" web
@@ -88,7 +88,9 @@ done
 iconutil -c icns "$WORK/icon.iconset" -o "$ICONS/icon.icns"
 
 echo "==> building"
-(cd src-tauri && cargo tauri build --bundles app)
+# The app reports the installer's version (to Kuro's API, and for the update notice).
+VERSION="$(cat "$WORK/version.txt" 2>/dev/null || echo 1.0.0)"
+(cd src-tauri && cargo tauri build --bundles app --config "{\"version\":\"$VERSION\"}")
 APP="src-tauri/target/release/bundle/macos/Wuwa Tappo.app"
 
 BUNDLE_ID=io.github.atimevil.wuwatappo-mac

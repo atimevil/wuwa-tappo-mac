@@ -27,3 +27,5 @@ core-foundation = "0.10"
 tokio = { version = "1", features = ["net", "io-util"] }
 native-tls = "0.2"
 tokio-native-tls = "0.3"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder"] }

@@ -21,11 +21,21 @@ extern "C" {
 
 pub fn spawn(app: AppHandle) {
     std::thread::spawn(move || {
+        #[cfg(debug_assertions)]
+        if std::env::var("WUWA_FORCE_PERMISSION_DIALOG").is_ok() {
+            crate::explain_input_monitoring(&app);
+        }
         // A listen-only tap is created even without permission; macOS then silently drops every
         // event. So check the permission itself and ask for it, instead of trusting tap creation.
         if !unsafe { CGPreflightListenEventAccess() } {
             log::warn!("[input] Input Monitoring not granted; requesting it");
             unsafe { CGRequestListenEventAccess() };
+            // macOS shows its own prompt only once per app; anyone who missed it gets stuck
+            // (the app is not even listed in Settings), so explain and offer to open the pane.
+            std::thread::sleep(Duration::from_millis(1500));
+            if !unsafe { CGPreflightListenEventAccess() } {
+                crate::explain_input_monitoring(&app);
+            }
             while !unsafe { CGPreflightListenEventAccess() } {
                 std::thread::sleep(Duration::from_secs(2));
             }

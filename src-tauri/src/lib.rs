@@ -758,6 +758,50 @@ fn save_app_ui_locale(app: AppHandle, locale: String) -> Result<(), String> {
 
 // ---------- misc ----------
 
+const INPUT_MONITORING_PANE: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent";
+
+/// Called from the input thread when Input Monitoring is still missing after the system request.
+pub(crate) fn explain_input_monitoring(app: &AppHandle) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let korean = read_store(app)["locale"].as_str().map_or(true, |l| l == "kr");
+    let (title, body, open, later) = if korean {
+        (
+            "입력 모니터링 권한이 필요합니다",
+            "Wuwa Tappo가 키 입력과 클릭을 세려면 입력 모니터링 권한이 필요합니다.\n\n\
+             '설정 열기'를 누른 뒤 목록에서 Wuwa Tappo를 켜 주세요. 목록에 없으면 아래 '+'를 눌러 \
+             응용 프로그램 폴더의 Wuwa Tappo를 추가하면 됩니다. 켜면 앱이 다시 시작됩니다.",
+            "설정 열기",
+            "나중에",
+        )
+    } else {
+        (
+            "Input Monitoring permission needed",
+            "Wuwa Tappo needs Input Monitoring to count key presses and clicks.\n\n\
+             Click 'Open Settings' and turn on Wuwa Tappo. If it is not listed, click '+' and add \
+             Wuwa Tappo from the Applications folder. The app restarts after you turn it on.",
+            "Open Settings",
+            "Later",
+        )
+    };
+    // A Dock-less (accessory) app is never frontmost, so its alert would open behind other windows.
+    let _ = app.run_on_main_thread(|| {
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            #[allow(deprecated)]
+            objc2_app_kit::NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
+        }
+    });
+    let open_settings = app
+        .dialog()
+        .message(body)
+        .title(title)
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(open.into(), later.into()))
+        .blocking_show();
+    if open_settings {
+        let _ = std::process::Command::new("open").arg(INPUT_MONITORING_PANE).status();
+    }
+}
+
 #[tauri::command]
 fn write_app_log(level: String, message: String) {
     match level.as_str() {

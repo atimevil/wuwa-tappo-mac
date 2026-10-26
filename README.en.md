@@ -2,7 +2,7 @@
 
 [한국어](README.md) | **English**
 
-An unofficial host that runs **Wuwa Tappo**, the Windows-only desktop pet for Wuthering Waves, on macOS.
+An unofficial host that runs **Wuwa Tappo**, the Windows-only desktop pet for Wuthering Waves (WuWa), on a Mac (macOS, Apple Silicon or Intel).
 
 This repository contains **no** Kuro Games frontend code or art. `tools/build.sh` downloads the official Windows installer from Kuro's server and verifies Kuro's signature. It then extracts the frontend from the installer and builds it into a macOS app (`Wuwa Tappo.app`). The repository itself contains a Tauri host that re-implements, for macOS, everything the frontend calls (windows, global input, tray, storage, and so on), plus the extraction, patching, and checking tools.
 

@@ -9,6 +9,7 @@ use core_graphics::event::{
 };
 use serde_json::json;
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -52,6 +53,7 @@ pub fn spawn(app: AppHandle) {
 fn run_tap(app: &AppHandle) -> bool {
     use CGEventType::*;
     let held_modifiers: Mutex<HashSet<i64>> = Mutex::new(HashSet::new());
+    let pressed_on_pet = AtomicBool::new(false);
     let tap = CGEventTap::new(
         CGEventTapLocation::Session,
         CGEventTapPlacement::TailAppendEventTap,
@@ -88,7 +90,7 @@ fn run_tap(app: &AppHandle) -> bool {
                 }
                 MouseMoved | LeftMouseDragged | RightMouseDragged | OtherMouseDragged => {
                     let p = event.location();
-                    let (x, y, member) = crate::on_pointer(app, p.x, p.y);
+                    let (x, y, member, _) = crate::on_pointer(app, p.x, p.y);
                     let _ = app.emit("mouse-move", with_member(json!({ "x": x, "y": y }), member));
                 }
                 _ => {
@@ -102,7 +104,15 @@ fn run_tap(app: &AppHandle) -> bool {
                         _ => return None,
                     };
                     let p = event.location();
-                    let (_, _, member) = crate::on_pointer(app, p.x, p.y);
+                    let (_, _, member, on_pet) = crate::on_pointer(app, p.x, p.y);
+                    if action == "press" {
+                        if on_pet {
+                            crate::remember_focus_owner();
+                        }
+                        pressed_on_pet.store(on_pet, Ordering::Relaxed);
+                    } else if pressed_on_pet.swap(false, Ordering::Relaxed) {
+                        crate::yield_focus_after_pet_click(app);
+                    }
                     let _ = app.emit(
                         "mouse-button",
                         with_member(json!({ "button": button, "action": action }), member),

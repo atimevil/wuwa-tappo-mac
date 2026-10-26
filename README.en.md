@@ -70,7 +70,7 @@ The Windows app is a Tauri 2 app. Its frontend (Vue) is compressed inside the ex
 - **Cookies:** the frontend is served from `tauri://localhost`, where WebKit keeps no cookies. The login token lives in a cookie, so every window replaces `document.cookie` with a localStorage-backed store.
 - **Realtime server (socket.io):** the server accepts WebSocket connections only from the `http(s)://tauri.localhost` origin or with no Origin header. WebSockets to that server therefore go through a loopback relay (127.0.0.1) inside the app. The relay changes only the Host and Origin of the upgrade request and passes the TLS connection through unchanged.
 - **Window-open events:** some windows, such as the login window, render only after they receive an event. For those windows the host sends the event after the page has registered its listener (patch 1).
-- **Click-through:** a transparent window covers the whole screen and accepts clicks only over the pet regions that the frontend reports.
+- **Click-through and focus:** a transparent window covers the whole screen and accepts clicks only over the pet regions that the frontend reports. macOS brings a clicked app to the front, so after a click on the pet the keyboard focus is handed back to the previous app. Keystrokes typed into a game or editor right afterwards are therefore not lost.
 - **Other:**
   - Auto-update is turned off, because the update files are Windows installers.
   - The collapsed panel width (112px) is an estimate taken from the CSS.

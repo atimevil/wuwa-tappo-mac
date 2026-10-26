@@ -168,7 +168,9 @@ impl MenuState {
 
 /// Called from the input thread for every pointer event: converts to the frontend's physical
 /// coordinates, toggles click-through, and finds the pet member under the cursor.
-pub(crate) fn on_pointer(app: &AppHandle, px: f64, py: f64) -> (f64, f64, Option<Value>) {
+/// Returns physical coordinates, the pet member under the cursor, and whether the main window
+/// is taking this click (cursor over a pet region).
+pub(crate) fn on_pointer(app: &AppHandle, px: f64, py: f64) -> (f64, f64, Option<Value>, bool) {
     let st = app.state::<Shared>();
     let mut hit = st.hit.lock().unwrap();
     let scale = if hit.scale > 0.0 { hit.scale } else { 1.0 };
@@ -187,7 +189,7 @@ pub(crate) fn on_pointer(app: &AppHandle, px: f64, py: f64) -> (f64, f64, Option
             let _ = w.set_ignore_cursor_events(!capture);
         }
     }
-    (px * scale, py * scale, member)
+    (px * scale, py * scale, member, capture)
 }
 
 fn refresh_geometry(app: &AppHandle) {
@@ -754,6 +756,47 @@ fn save_cumulative_click_count(app: AppHandle, count: u64, cuid: String, environ
 #[tauri::command]
 fn save_app_ui_locale(app: AppHandle, locale: String) -> Result<(), String> {
     update_store(&app, |v| v["locale"] = json!(locale))
+}
+
+/// The app that was frontmost when a click on the pet began (0 = none).
+static FOCUS_OWNER_PID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// Called on mouse-down over the pet, before macOS activates this app for the click.
+pub(crate) fn remember_focus_owner() {
+    let front = objc2_app_kit::NSWorkspace::sharedWorkspace().frontmostApplication();
+    let pid = front.map_or(0, |app| app.processIdentifier());
+    let own = std::process::id() as i32;
+    FOCUS_OWNER_PID.store(if pid == own { 0 } else { pid }, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Clicking a window of a background app makes macOS activate that app, so after a click on the pet
+/// the keyboard focus would stay here and the next keystrokes typed into the game or editor would be
+/// lost. Pet clicks are handled from the global event tap anyway, so hand focus back to the app that
+/// had it. macOS 14+ ignores a plain `deactivate`; activation must be yielded to a named app.
+/// A click that opens the panel or login window re-focuses it afterwards (open_aux calls set_focus).
+pub(crate) fn yield_focus_after_pet_click(app: &AppHandle) {
+    let pid = FOCUS_OWNER_PID.swap(0, std::sync::atomic::Ordering::Relaxed);
+    if pid == 0 {
+        return;
+    }
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        let _ = handle.run_on_main_thread(move || {
+            use objc2_app_kit::{NSApplication, NSApplicationActivationOptions, NSRunningApplication};
+            let (Some(mtm), Some(owner)) = (
+                objc2::MainThreadMarker::new(),
+                NSRunningApplication::runningApplicationWithProcessIdentifier(pid),
+            ) else {
+                return;
+            };
+            let ns_app = NSApplication::sharedApplication(mtm);
+            if ns_app.isActive() {
+                ns_app.yieldActivationToApplication(&owner);
+                owner.activateWithOptions(NSApplicationActivationOptions::empty());
+            }
+        });
+    });
 }
 
 // ---------- misc ----------

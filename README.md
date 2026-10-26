@@ -2,16 +2,15 @@
 
 명조: 워더링 웨이브의 데스크톱 펫 **Wuwa Tappo**(Windows 전용)를 macOS에서 실행하기 위한 비공식 호스트입니다.
 
-이 저장소에는 쿠로게임즈의 화면 코드나 그림 자원이 **들어 있지 않습니다**. 공식 Windows 설치 파일을 직접 받아 `tools/build.sh`를 실행하면, 설치 파일에서 화면을 추출해 macOS 앱(`Wuwa Tappo.app`)으로 빌드합니다. 이 저장소에 들어 있는 것은 그 화면이 호출하는 기능(창, 전역 입력, 트레이, 저장 등)을 macOS용으로 다시 구현한 Tauri 호스트와, 추출·패치·검사 도구입니다.
+이 저장소에는 쿠로게임즈의 화면 코드나 그림 자원이 **들어 있지 않습니다**. `tools/build.sh`가 쿠로 공식 서버에서 Windows 설치 파일을 받아 쿠로의 서명을 검증합니다. 그다음 설치 파일에서 화면을 추출해 macOS 앱(`Wuwa Tappo.app`)으로 빌드합니다. 이 저장소에 들어 있는 것은 그 화면이 호출하는 기능(창, 전역 입력, 트레이, 저장 등)을 macOS용으로 다시 구현한 Tauri 호스트와, 추출·패치·검사 도구입니다.
 
-> Unofficial macOS host for Kuro Games' Windows desktop pet *Wuwa Tappo*. No Kuro code or art is included; `tools/build.sh` extracts the frontend from your own copy of the official installer and builds a macOS app around it. Not affiliated with or endorsed by Kuro Games.
+> Unofficial macOS host for Kuro Games' Windows desktop pet *Wuwa Tappo*. No Kuro code or art is included. `tools/build.sh` downloads the official installer from Kuro's server, verifies Kuro's signature, extracts the frontend, and builds a macOS app around it. Not affiliated with or endorsed by Kuro Games.
 
 ## 준비물
 
 - Apple Silicon 또는 Intel Mac, macOS 11 이상
-- 공식 설치 파일 `WuwaTappo-global_<버전>_x64-setup.exe`. 공식 다운로드 페이지에서 받습니다.
 - Xcode Command Line Tools: `xcode-select --install`
-- Homebrew 패키지: `brew install sevenzip brotli rustup`
+- Homebrew 패키지: `brew install sevenzip brotli minisign rustup`
 - Rust와 Tauri CLI:
   ```sh
   rustup default stable
@@ -24,17 +23,18 @@
 ```sh
 git clone https://github.com/atimevil/wuwa-tappo-mac.git
 cd wuwa-tappo-mac
-tools/build.sh ~/Downloads/WuwaTappo-global_1.0.0_x64-setup.exe
+tools/build.sh
 ```
 
 `build.sh`는 다음을 순서대로 처리합니다.
 
-1. 설치 파일에서 화면을 추출합니다.
-2. macOS용 패치를 적용합니다.
-3. 호스트와 화면의 호출 규약이 맞는지 검사합니다.
-4. 아이콘을 만들고 앱을 빌드·서명한 뒤 `/Applications`에 설치합니다.
+1. 쿠로의 배포 정보(공식 앱의 업데이터가 읽는 파일)에서 최신 설치 파일을 받습니다. 공식 앱에 들어 있는 쿠로 업데이터 공개키(minisign `2DB584868D18BB49`)로 서명을 검증하고, 검증에 실패하면 중단합니다.
+2. 설치 파일에서 화면을 추출합니다.
+3. macOS용 패치를 적용합니다.
+4. 호스트와 화면의 호출 규약이 맞는지 검사합니다.
+5. 아이콘을 만들고 앱을 빌드·서명한 뒤 `/Applications`에 설치합니다.
 
-설치하지 않고 빌드만 하려면 끝에 `--no-install`을 붙입니다. 결과물은 `src-tauri/target/release/bundle/macos/`에 생깁니다.
+이미 받아 둔 설치 파일을 쓰려면 `tools/build.sh ~/Downloads/WuwaTappo-global_1.0.0_x64-setup.exe`처럼 경로를 넘깁니다. 이 경우에는 서명을 검증하지 않습니다. 설치하지 않고 빌드만 하려면 `--no-install`을 붙입니다. 결과물은 `src-tauri/target/release/bundle/macos/`에 생깁니다.
 
 ## 권한
 
@@ -78,7 +78,7 @@ Windows 앱은 Tauri 2 앱입니다. 화면(Vue)은 실행 파일 안에 압축�
 
 ## 새 버전이 나왔을 때
 
-새 설치 파일로 `tools/build.sh`를 다시 실행하면 됩니다. 패치나 호출 규약 검사가 실패하면 화면 코드가 바뀐 것입니다. 이때는 `tools/patch_frontend.py`의 원문 문자열과 `src-tauri/src/lib.rs`의 명령 목록을 새 버전에 맞게 고쳐야 합니다.
+`tools/build.sh`를 다시 실행하면 최신 설치 파일로 다시 빌드합니다. 패치나 호출 규약 검사가 실패하면 화면 코드가 바뀐 것입니다. 이때는 `tools/patch_frontend.py`의 원문 문자열과 `src-tauri/src/lib.rs`의 명령 목록을 새 버전에 맞게 고쳐야 합니다.
 
 ## 검사 도구
 
@@ -94,4 +94,4 @@ Windows 앱은 Tauri 2 앱입니다. 화면(Vue)은 실행 파일 안에 압축�
 
 ## 라이선스와 고지
 
-이 저장소의 코드는 MIT 라이선스입니다(`LICENSE`). Wuwa Tappo, 명조: 워더링 웨이브와 관련 이름·그림·화면 코드의 권리는 Kuro Games에 있습니다. 이 프로젝트는 Kuro Games와 관계가 없고, 승인받지 않았습니다. 빌드한 앱이나 추출한 자원을 다른 사람에게 배포하지 마세요.
+이 저장소의 코드는 MIT 라이선스입니다(`LICENSE`). Wuwa Tappo, 명조: 워더링 웨이브와 관련 이름·그림·화면 코드의 권리는 Kuro Games에 있습니다. 이 프로젝트는 Kuro Games와 관계가 없고, 승인받지 않았습니다. 빌드한 앱이나 추출한 자원에는 쿠로의 저작물이 들어 있으니 다른 사람에게 배포하지 마세요. 다른 사람도 이 저장소를 받아 각자 빌드하면 됩니다.

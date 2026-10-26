@@ -55,13 +55,16 @@ echo "==> building"
 (cd src-tauri && cargo tauri build --bundles app)
 APP="src-tauri/target/release/bundle/macos/Wuwa Tappo.app"
 
+BUNDLE_ID=io.github.atimevil.wuwatappo-mac
 IDENTITY="WuwaTappo Local Signing"
 if security find-identity -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
-  echo "==> signing with '$IDENTITY'"
-  codesign --force --deep --identifier io.github.atimevil.wuwatappo-mac -s "$IDENTITY" "$APP"
+  echo "==> signing with '$IDENTITY' (Input Monitoring stays granted across rebuilds)"
+  codesign --force --deep --identifier "$BUNDLE_ID" -s "$IDENTITY" "$APP"
+  ADHOC=0
 else
-  echo "==> no '$IDENTITY' identity: keeping the ad-hoc signature."
-  echo "    Input Monitoring must be granted again after every rebuild; run tools/make_signing_identity.sh once to avoid that."
+  echo "==> ad-hoc signing (no certificate needed; Input Monitoring is asked again after each rebuild)"
+  codesign --force --deep --identifier "$BUNDLE_ID" -s - "$APP"
+  ADHOC=1
 fi
 
 if [ "$INSTALL" = 1 ]; then
@@ -73,6 +76,11 @@ if [ "$INSTALL" = 1 ]; then
   LSR=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
   "$LSR" -f "/Applications/Wuwa Tappo.app"
   "$LSR" -u "$ROOT/$APP" 2>/dev/null || true  # so wuwa-buddy:// login callbacks open the installed copy
+  if [ "$ADHOC" = 1 ]; then
+    # An ad-hoc grant belongs to the previous build's hash; clear it so Settings shows no stale,
+    # already-enabled entry that silently does nothing. The app then asks for the permission.
+    tccutil reset ListenEvent "$BUNDLE_ID" >/dev/null 2>&1 || true
+  fi
   open "/Applications/Wuwa Tappo.app"
   echo "done: /Applications/Wuwa Tappo.app"
 else

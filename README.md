@@ -24,7 +24,6 @@
 ```sh
 git clone https://github.com/atimevil/wuwa-tappo-mac.git
 cd wuwa-tappo-mac
-tools/make_signing_identity.sh        # 처음 한 번만, 선택 사항 (아래 "권한" 참고)
 tools/build.sh ~/Downloads/WuwaTappo-global_1.0.0_x64-setup.exe
 ```
 
@@ -43,7 +42,11 @@ tools/build.sh ~/Downloads/WuwaTappo-global_1.0.0_x64-setup.exe
 
 macOS의 요청 창은 앱마다 한 번만 뜨고, 그 창을 놓치면 설정 목록에 앱이 나타나지 않을 수도 있습니다. 그래서 권한이 없으면 앱이 시작할 때마다 직접 안내 창을 띄웁니다. 안내 창에서 "설정 열기"를 누른 뒤 목록에서 Wuwa Tappo를 켜면 됩니다. 목록에 없으면 아래 "+"를 눌러 응용 프로그램 폴더의 Wuwa Tappo를 추가하세요.
 
-macOS는 이 권한을 앱의 서명에 묶어 둡니다. 따로 서명하지 않으면 다시 빌드할 때마다 서명이 바뀌어 권한을 다시 줘야 합니다. `tools/make_signing_identity.sh`는 로그인 키체인에 자체 서명 인증서(`WuwaTappo Local Signing`)를 하나 만듭니다. 이후 `build.sh`가 이 인증서로 서명하므로, 다시 빌드해도 권한이 유지됩니다. 처음 서명할 때 키체인 암호를 묻는데, "항상 허용"을 고르면 됩니다. 인증서는 키체인 접근 앱에서 언제든 지울 수 있습니다.
+### 다시 빌드할 때마다 권한을 묻는 이유 (인증서는 선택)
+
+macOS는 이 권한을 앱의 서명에 묶어 둡니다. 기본 빌드는 인증서 없이 임시 서명(ad-hoc)을 하기 때문에, 다시 빌드하면 macOS가 다른 앱으로 보고 권한을 한 번 더 묻습니다. 새 버전이 나와서 다시 빌드할 때 한 번 허용하면 되므로, 보통은 이대로 쓰면 됩니다. `build.sh`는 이전 빌드의 권한 기록을 지운 뒤 설치하므로, 목록에 켜져 있는데 안 먹는 낡은 항목은 남지 않습니다.
+
+자주 다시 빌드한다면(개발이나 수정 중) `tools/make_signing_identity.sh`를 한 번 실행하세요. 로그인 키체인에 자체 서명 인증서(`WuwaTappo Local Signing`)를 하나 만듭니다. 이후 `build.sh`가 이 인증서로 서명하므로, 다시 빌드해도 권한이 유지됩니다. 처음 서명할 때 키체인 암호를 묻는데, "항상 허용"을 고르면 됩니다. 인증서는 키체인 접근 앱에서 언제든 지울 수 있습니다.
 
 ## 로그인
 

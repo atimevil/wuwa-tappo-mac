@@ -769,7 +769,8 @@ pub(crate) fn explain_input_monitoring(app: &AppHandle) {
             "입력 모니터링 권한이 필요합니다",
             "Wuwa Tappo가 키 입력과 클릭을 세려면 입력 모니터링 권한이 필요합니다.\n\n\
              '설정 열기'를 누른 뒤 목록에서 Wuwa Tappo를 켜 주세요. 목록에 없으면 아래 '+'를 눌러 \
-             응용 프로그램 폴더의 Wuwa Tappo를 추가하면 됩니다. 켜면 앱이 다시 시작됩니다.",
+             응용 프로그램 폴더의 Wuwa Tappo를 추가하면 됩니다. 이미 켜져 있는데도 이 창이 뜨면 \
+             이전 빌드의 항목이니 '−'로 지우고 다시 추가하세요. 켜면 앱이 다시 시작됩니다.",
             "설정 열기",
             "나중에",
         )
@@ -778,7 +779,9 @@ pub(crate) fn explain_input_monitoring(app: &AppHandle) {
             "Input Monitoring permission needed",
             "Wuwa Tappo needs Input Monitoring to count key presses and clicks.\n\n\
              Click 'Open Settings' and turn on Wuwa Tappo. If it is not listed, click '+' and add \
-             Wuwa Tappo from the Applications folder. The app restarts after you turn it on.",
+             Wuwa Tappo from the Applications folder. If it is already on and you still see this, \
+             that entry belongs to an earlier build: remove it with '-' and add it again. \
+             The app restarts after you turn it on.",
             "Open Settings",
             "Later",
         )

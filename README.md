@@ -1,10 +1,10 @@
 # Wuwa Tappo for macOS (unofficial)
 
+**한국어** | [English](README.en.md)
+
 명조: 워더링 웨이브의 데스크톱 펫 **Wuwa Tappo**(Windows 전용)를 macOS에서 실행하기 위한 비공식 호스트입니다.
 
 이 저장소에는 쿠로게임즈의 화면 코드나 그림 자원이 **들어 있지 않습니다**. `tools/build.sh`가 쿠로 공식 서버에서 Windows 설치 파일을 받아 쿠로의 서명을 검증합니다. 그다음 설치 파일에서 화면을 추출해 macOS 앱(`Wuwa Tappo.app`)으로 빌드합니다. 이 저장소에 들어 있는 것은 그 화면이 호출하는 기능(창, 전역 입력, 트레이, 저장 등)을 macOS용으로 다시 구현한 Tauri 호스트와, 추출·패치·검사 도구입니다.
-
-> Unofficial macOS host for Kuro Games' Windows desktop pet *Wuwa Tappo*. No Kuro code or art is included. `tools/build.sh` downloads the official installer from Kuro's server, verifies Kuro's signature, extracts the frontend, and builds a macOS app around it. Not affiliated with or endorsed by Kuro Games.
 
 ## 준비물
 

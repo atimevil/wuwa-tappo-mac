@@ -1,0 +1,5 @@
+src-tauri/target/
+src-tauri/gen/
+src-tauri/icons/
+web/
+.DS_Store

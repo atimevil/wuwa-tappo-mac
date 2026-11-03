@@ -1,6 +1,6 @@
 // Runtime QA: injected into the main window of a debug build (WUWA_QA_SCRIPT=tools/qa_invoke.js).
 // Calls every host command with the argument shapes the frontend uses and logs `[QA] PASS|FAIL`.
-// Skipped on purpose: exit_app, hide_main_after_maintenance_notice_ready, open_maintenance_notice
+// Skipped on purpose: open_update_window (shows the modal rebuild notice), exit_app, hide_main_after_maintenance_notice_ready, open_maintenance_notice
 // (they quit or hide the pet) and popup_main_dock_context_menu (a modal menu; covered by the UI pass).
 (() => {
   if (window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label !== 'main') return;
@@ -24,7 +24,7 @@
   setTimeout(async () => {
     log('start');
     await check('get_track_os_info', () => inv('get_track_os_info'), (v) => v.os === 'macOS' && typeof v.osVersion === 'string' && v.osVersion.length > 0);
-    await check('get_main_desktop_safe_area', () => inv('get_main_desktop_safe_area'), (v) => isInsets(v.insets) && v.autoHideEdge === null && v.foregroundFullscreen === false);
+    await check('get_main_desktop_safe_area', () => inv('get_main_desktop_safe_area'), (v) => isInsets(v.insets) && v.autoHideEdge === null && v.foregroundFullscreen === false && typeof v.foregroundApplicationFullscreen === 'boolean');
     await check('get_main_taskbar_insets', () => inv('get_main_taskbar_insets'), isInsets);
     const before = await check('load_key_press_count', () => inv('load_key_press_count', { environment: env }), Number.isFinite);
     await check('save_key_press_count', () => inv('save_key_press_count', { count: before, environment: env }));
@@ -38,7 +38,7 @@
     await check('save_app_ui_locale', () => inv('save_app_ui_locale', { locale: 'kr' }));
     await check('write_app_log', () => inv('write_app_log', { level: 'warn', message: '[QA] warn-level log line' }));
     await check('is_force_update_locked', () => inv('is_force_update_locked'), (v) => v === false);
-    await check('check_app_update', () => inv('check_app_update', { endpoint: 'https://example.invalid/latest.json' }), (v) => v === null);
+    await check('check_app_update', () => inv('check_app_update', { endpoint: 'https://example.invalid/latest.json' }), (v) => v === null || (typeof v.version === 'string' && v.rawJson));
     await check('has_maintenance_notice', () => inv('has_maintenance_notice'), (v) => v === false);
     await check('get_maintenance_notice_payload', () => inv('get_maintenance_notice_payload'), (v) => v === null);
     await check('is_elevated_autostart_enabled', () => inv('is_elevated_autostart_enabled'), (v) => v === false);
@@ -47,6 +47,15 @@
     await check('is_devtools_hotkeys_build', () => inv('is_devtools_hotkeys_build'), (v) => v === false);
     await check('get_boot_diagnostics', () => inv('get_boot_diagnostics'), (v) => v === null);
     await check('ensure_main_taskbar_icon', () => inv('ensure_main_taskbar_icon'));
+    await check('set_main_skip_taskbar', () => inv('set_main_skip_taskbar', { skip: false }));
+    const sc = await check('get_app_shortcuts', () => inv('get_app_shortcuts'), (v) => ['gameMode', 'switchScreen', 'togglePet'].every((k) => Number.isFinite(v[k]?.key)));
+    if (sc) {
+      await check('set_app_shortcuts (duplicate rejected)', () => inv('set_app_shortcuts', { config: { ...sc, gameMode: sc.togglePet } }).then(() => 'accepted', (e) => String(e)), (v) => v === 'duplicate');
+      await check('set_app_shortcuts (same config)', () => inv('set_app_shortcuts', { config: sc }));
+      await check('get_app_shortcuts (round trip)', () => inv('get_app_shortcuts'), (v) => JSON.stringify(v) === JSON.stringify(sc));
+    }
+    await check('set_shortcut_capture on', () => inv('set_shortcut_capture', { active: true }));
+    await check('set_shortcut_capture off', () => inv('set_shortcut_capture', { active: false }));
     await check('apply_main_window_position', () => inv('apply_main_window_position', { payload: { alwaysOnTop: true, position: 'bottomRight', applyPosition: false } }));
     await check('set_main_window_fullscreen_shell', () => inv('set_main_window_fullscreen_shell'));
     const mon = await check('plugin:window|current_monitor', () => inv('plugin:window|current_monitor', { label: 'main' }), (v) => v && v.size.width > 0);
@@ -64,7 +73,7 @@
     await check('set_main_force_cursor_ignore', () => inv('set_main_force_cursor_ignore', { enabled: true }));
     await check('set_native_input_cursor', () => inv('set_native_input_cursor', { kind: 'pointer' }));
     await check('set_overlay_cursor', () => inv('set_overlay_cursor', { kind: 'default' }));
-    await check('sync_native_menu', () => inv('sync_native_menu', { labels: { openBag: 'Bag', quit: 'Quit', trayTooltip: 'Wuwa Tappo' }, petDockVisible: true, petScale: 100, windowOpacity: 100, windowPassthrough: false }));
+    await check('sync_native_menu', () => inv('sync_native_menu', { labels: { openBag: 'Bag', quit: 'Quit', trayTooltip: 'Wuwa Tappo' }, petDockVisible: true, petScale: 100, windowOpacity: 100, windowPassthrough: false, gameMode: false }));
     await check('show_toast_overlay', () => inv('show_toast_overlay'));
     await check('toast visible', () => inv('plugin:window|is_visible', { label: 'toast' }), (v) => v === true);
 
@@ -79,10 +88,8 @@
     };
     await auxCycle('about', 'open_about_window', 'close_about_window');
     await auxCycle('oss-notice', 'open_oss_notice_window', 'close_oss_notice_window');
-    await auxCycle('update', 'open_update_window', 'close_update_window', {
-      openArgs: { detail: { newVersion: '9.9.9', body: 'qa' } },
-      during: () => check('get_app_update_detail', () => inv('get_app_update_detail'), (v) => v?.newVersion === '9.9.9'),
-    });
+    await check('get_app_update_detail', () => inv('get_app_update_detail'), (v) => v === null);
+    await check('close_update_window', () => inv('close_update_window'));
     await auxCycle('panel', 'open_panel_window', 'close_panel_window', {
       openArgs: { payload: { tab: 'setting' } },
       during: async () => {

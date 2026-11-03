@@ -45,8 +45,9 @@ PATCHES = [
     },
     {
         'name': 'activityInfo runs while the startup probe is reconnecting',
-        'find': r'if\(([\w$]+)\.value\.status==="online"\|\|\1\.value\.status==="unknown"\)try\{',
-        'replace': r'if(\1.value.status==="online"||\1.value.status==="unknown"||\1.value.status==="reconnecting")try{',
+        # 1.0.3 prefixes the condition with a reset (`if(x=!1,net.value.status===...`).
+        'find': r'if\(((?:[\w$]+=!1,)?)([\w$]+)\.value\.status==="online"\|\|\2\.value\.status==="unknown"\)try\{',
+        'replace': r'if(\1\2.value.status==="online"||\2.value.status==="unknown"||\2.value.status==="reconnecting")try{',
         'done': r'\.value\.status==="unknown"\|\|[\w$]+\.value\.status==="reconnecting"\)try\{',
         'required': True,
     },

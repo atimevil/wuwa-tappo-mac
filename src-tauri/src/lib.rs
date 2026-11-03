@@ -138,7 +138,6 @@ struct Shared {
     hit: Mutex<Hit>,
     menu: Mutex<MenuState>,
     maintenance: Mutex<Option<Value>>,
-    update_detail: Mutex<Option<Value>>,
     store: Mutex<()>,
     aux_events: Mutex<AuxEvents>,
 }
@@ -158,6 +157,7 @@ struct MenuState {
     pet_scale: u32,
     window_opacity: u32,
     window_passthrough: bool,
+    game_mode: bool,
 }
 
 impl MenuState {
@@ -514,6 +514,88 @@ fn finish_main_window_monitor_switch(app: AppHandle) {
 #[tauri::command]
 fn ensure_main_taskbar_icon() {}
 
+/// "Show taskbar icon" setting (1.0.3+). shortcut: macOS has no taskbar and this app never shows a Dock
+/// icon, so the setting has no effect; map it to a Dock icon (activation policy Regular) if users ask.
+#[tauri::command]
+fn set_main_skip_taskbar(skip: bool) {
+    let _ = skip;
+}
+
+// ---------- app shortcuts (1.0.3+) ----------
+// The Windows host registers these as global hotkeys and emits `app-shortcut` with the action name.
+// Bindings use Windows virtual-key codes and modifier bits Alt 1, Ctrl 2, Shift 4, Win 8 (Cmd here).
+
+static SHORTCUTS: Mutex<Option<Value>> = Mutex::new(None);
+static SHORTCUT_CAPTURE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn shortcuts(app: &AppHandle) -> Value {
+    let mut cache = SHORTCUTS.lock().unwrap();
+    cache
+        .get_or_insert_with(|| {
+            // Defaults as in the frontend's DEFAULT_APP_SHORTCUTS: F7, F8, F9.
+            let mut v = json!({
+                "gameMode": { "modifiers": 0, "key": 118 },
+                "switchScreen": { "modifiers": 0, "key": 119 },
+                "togglePet": { "modifiers": 0, "key": 120 },
+            });
+            if let Some(saved) = read_store(app)["shortcuts"].as_object() {
+                for (k, b) in saved {
+                    if v.get(k).is_some() {
+                        v[k] = b.clone();
+                    }
+                }
+            }
+            v
+        })
+        .clone()
+}
+
+fn binding(b: &Value) -> (u64, u64) {
+    (b["modifiers"].as_u64().unwrap_or(0), b["key"].as_u64().unwrap_or(0))
+}
+
+#[tauri::command]
+fn get_app_shortcuts(app: AppHandle) -> Value {
+    shortcuts(&app)
+}
+
+#[tauri::command]
+fn set_app_shortcuts(app: AppHandle, config: Value) -> Result<(), String> {
+    let map = config.as_object().ok_or("unavailable")?;
+    let mut seen = std::collections::HashSet::new();
+    for b in map.values() {
+        let (m, k) = binding(b);
+        if m > 15 || k > 255 {
+            return Err("unavailable".into());
+        }
+        if k != 0 && !seen.insert((m, k)) {
+            return Err("duplicate".into());
+        }
+    }
+    update_store(&app, |v| v["shortcuts"] = config.clone())?;
+    *SHORTCUTS.lock().unwrap() = None;
+    let _ = app.emit("app-shortcuts-changed", shortcuts(&app));
+    Ok(())
+}
+
+/// The settings page pauses shortcuts while it records a new one.
+#[tauri::command]
+fn set_shortcut_capture(active: bool) {
+    SHORTCUT_CAPTURE.store(active, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Called from the input thread on every key press (not auto-repeat).
+pub(crate) fn trigger_shortcut(app: &AppHandle, modifiers: u64, key: u64) {
+    if SHORTCUT_CAPTURE.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let all = shortcuts(app);
+    let hit = all.as_object().and_then(|m| m.iter().find(|(_, b)| binding(b) == (modifiers, key) && key != 0));
+    if let Some((action, _)) = hit {
+        let _ = app.emit("app-shortcut", action);
+    }
+}
+
 fn insets(app: &AppHandle) -> Result<Value, String> {
     let m = main_monitor(app)?;
     let s = m.scale_factor();
@@ -527,7 +609,47 @@ fn insets(app: &AppHandle) -> Result<Value, String> {
 
 #[tauri::command]
 fn get_main_desktop_safe_area(app: AppHandle) -> Result<Value, String> {
-    Ok(json!({ "insets": insets(&app)?, "autoHideEdge": null, "foregroundFullscreen": false }))
+    Ok(json!({
+        "insets": insets(&app)?,
+        "autoHideEdge": null,
+        "foregroundFullscreen": false,
+        // 1.0.3+: drives "auto game mode in full screen".
+        "foregroundApplicationFullscreen": foreground_app_fullscreen(),
+    }))
+}
+
+/// True when the frontmost other app has a normal-level window covering the whole main display
+/// (a full-screen game or video). shortcut: checks the main display only, not the pet's display.
+fn foreground_app_fullscreen() -> bool {
+    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::number::CFNumber;
+    use core_foundation::string::CFString;
+    use core_graphics::display::CGDisplay;
+    use core_graphics::geometry::CGRect;
+    use core_graphics::window::{
+        copy_window_info, kCGNullWindowID, kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly,
+    };
+    let Some(front) = objc2_app_kit::NSWorkspace::sharedWorkspace().frontmostApplication() else { return false };
+    let pid = front.processIdentifier() as i64;
+    if pid == std::process::id() as i64 {
+        return false;
+    }
+    let screen = CGDisplay::main().bounds();
+    let Some(list) = copy_window_info(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID) else {
+        return false;
+    };
+    list.iter().any(|w| {
+        let d: CFDictionary<CFString, CFType> = unsafe { CFDictionary::wrap_under_get_rule(*w as _) };
+        let num = |k: &'static str| d.find(CFString::from_static_string(k)).and_then(|v| v.downcast::<CFNumber>()).and_then(|n| n.to_i64());
+        if num("kCGWindowOwnerPID") != Some(pid) || num("kCGWindowLayer") != Some(0) {
+            return false;
+        }
+        let bounds = d.find(CFString::from_static_string("kCGWindowBounds")).and_then(|v| v.downcast::<CFDictionary>());
+        bounds.and_then(|b| CGRect::from_dict_representation(&b)).is_some_and(|r| {
+            r.size.width >= screen.size.width && r.size.height >= screen.size.height
+        })
+    })
 }
 
 #[tauri::command]
@@ -620,6 +742,7 @@ fn build_menu(app: &AppHandle, prefix: &str, s: &MenuState) -> tauri::Result<Men
     let toggle_pet = if s.pet_dock_visible { s.label("hidePet", "Hide Pet") } else { s.label("showPet", "Show Pet") };
     let settings_key = if prefix == "tray" { "trayOpenSettings" } else { "dockSettings" };
     let passthrough = CheckMenuItem::with_id(app, id("window_passthrough"), s.label("windowPassthrough", "Click-through"), true, s.window_passthrough, None::<&str>)?;
+    let game_mode = CheckMenuItem::with_id(app, id("game_mode"), s.label("gameMode", "Game Mode"), true, s.game_mode, None::<&str>)?;
     let sep = || PredefinedMenuItem::separator(app);
     Menu::with_items(
         app,
@@ -634,6 +757,7 @@ fn build_menu(app: &AppHandle, prefix: &str, s: &MenuState) -> tauri::Result<Men
             &scale,
             &opacity,
             &passthrough,
+            &game_mode,
             &sep()?,
             &item("restart", s.label("restart", "Restart"))?,
             &item("quit", s.label("quit", "Quit"))?,
@@ -651,6 +775,7 @@ fn on_menu(app: &AppHandle, id: &str) {
         "settings" => emit("dock-open-panel", json!("setting")),
         "toggle_pet" => emit("tray-toggle-pet-visibility", Value::Null),
         "window_passthrough" => emit("tray-toggle-window-passthrough", Value::Null),
+        "game_mode" => emit("tray-toggle-game-mode", Value::Null),
         "restart" => emit("tray-restart", Value::Null),
         "quit" => emit("tray-quit", Value::Null),
         _ => {
@@ -671,6 +796,7 @@ fn sync_native_menu(
     pet_scale: Option<f64>,
     window_opacity: Option<f64>,
     window_passthrough: Option<bool>,
+    game_mode: Option<bool>,
 ) -> Result<(), String> {
     let st = app.state::<Shared>();
     let snapshot = {
@@ -683,6 +809,7 @@ fn sync_native_menu(
         m.pet_scale = pet_scale.unwrap_or(100.0).round() as u32;
         m.window_opacity = window_opacity.unwrap_or(100.0).round() as u32;
         m.window_passthrough = window_passthrough.unwrap_or(false);
+        m.game_mode = game_mode.unwrap_or(false);
         m.clone()
     };
     if let Some(tray) = app.tray_by_id("main-tray") {
@@ -1114,9 +1241,10 @@ async fn check_app_update(app: AppHandle, endpoint: Option<String>) -> Option<Va
     }))
 }
 
+/// The update window is never opened on macOS (see open_update_window), so there is no detail.
 #[tauri::command]
-fn get_app_update_detail(app: AppHandle) -> Option<Value> {
-    app.state::<Shared>().update_detail.lock().unwrap().clone()
+fn get_app_update_detail() -> Option<Value> {
+    None
 }
 
 #[tauri::command]
@@ -1287,6 +1415,10 @@ pub fn run() {
             sync_main_window_to_current_monitor,
             finish_main_window_monitor_switch,
             ensure_main_taskbar_icon,
+            set_main_skip_taskbar,
+            get_app_shortcuts,
+            set_app_shortcuts,
+            set_shortcut_capture,
             get_main_desktop_safe_area,
             get_main_taskbar_insets,
             set_main_hit_region,
@@ -1320,6 +1452,13 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::Rect;
+
+    /// Manual: `cargo test fullscreen_probe -- --ignored --nocapture` with and without a full-screen app in front.
+    #[test]
+    #[ignore]
+    fn fullscreen_probe() {
+        println!("foreground_app_fullscreen = {}", super::foreground_app_fullscreen());
+    }
 
     #[test]
     fn dialogs_cover_every_app_language() {

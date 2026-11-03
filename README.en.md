@@ -34,7 +34,7 @@ tools/build.sh
 4. Checks that the host and the frontend agree on every command they exchange.
 5. Generates the icons, builds and signs the app, and installs it to `/Applications`.
 
-To use an installer you already downloaded, pass its path, for example `tools/build.sh ~/Downloads/WuwaTappo-global_1.0.0_x64-setup.exe`. In that case the signature is not verified. To build without installing, add `--no-install`. The build output goes to `src-tauri/target/release/bundle/macos/`.
+To use an installer you already downloaded, pass its path, for example `tools/build.sh ~/Downloads/WuwaTappo-global_1.0.3_x64-setup.exe`. In that case the signature is not verified. To build without installing, add `--no-install`. The build output goes to `src-tauri/target/release/bundle/macos/`.
 
 ## Permissions
 
@@ -59,7 +59,7 @@ The Windows app is a Tauri 2 app. Its frontend (Vue) is compressed inside the ex
 
 | Part | Files |
 |---|---|
-| The 51 commands the frontend calls, windows, menus, storage | `src-tauri/src/lib.rs` |
+| The commands the frontend calls, windows, menus, storage | `src-tauri/src/lib.rs` |
 | Global keyboard and mouse (listen-only CGEventTap) | `src-tauri/src/input.rs` |
 | WebSocket relay for the realtime server | `src-tauri/src/ws_proxy.rs` |
 | Installer unpacking and asset extraction | `tools/extract_payload.py`, `tools/extract_assets.py` |
@@ -73,6 +73,8 @@ The Windows app is a Tauri 2 app. Its frontend (Vue) is compressed inside the ex
 - **Click-through and focus:** a transparent window covers the whole screen and accepts clicks only over the pet regions that the frontend reports. macOS brings a clicked app to the front, so after a click on the pet the keyboard focus is handed back to the previous app. Keystrokes typed into a game or editor right afterwards are therefore not lost.
 - **Other:**
   - The update files are Windows installers, so the app does not install them. Where Kuro's update window would open, the app shows a notice to rebuild instead.
+  - **Shortcuts (from 1.0.3):** the shortcuts set in Settings (by default F7 game mode, F8 switch screen, F9 hide pet) are handled by the global key listener. Unlike on Windows the key is not captured, so the app in front receives it too. "Win" in Settings means the Command key on a Mac.
+  - The "Show taskbar icon" setting has no effect on macOS. This app never shows a Dock icon.
   - The collapsed panel width (112px) is an estimate taken from the CSS.
   - With many menu bar icons, the tray icon can be hidden behind the MacBook notch. The same menu also opens when you right-click the pet.
 

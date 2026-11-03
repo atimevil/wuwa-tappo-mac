@@ -34,7 +34,7 @@ tools/build.sh
 4. 호스트와 화면의 호출 규약이 맞는지 검사합니다.
 5. 아이콘을 만들고 앱을 빌드·서명한 뒤 `/Applications`에 설치합니다.
 
-이미 받아 둔 설치 파일을 쓰려면 `tools/build.sh ~/Downloads/WuwaTappo-global_1.0.0_x64-setup.exe`처럼 경로를 넘깁니다. 이 경우에는 서명을 검증하지 않습니다. 설치하지 않고 빌드만 하려면 `--no-install`을 붙입니다. 결과물은 `src-tauri/target/release/bundle/macos/`에 생깁니다.
+이미 받아 둔 설치 파일을 쓰려면 `tools/build.sh ~/Downloads/WuwaTappo-global_1.0.3_x64-setup.exe`처럼 경로를 넘깁니다. 이 경우에는 서명을 검증하지 않습니다. 설치하지 않고 빌드만 하려면 `--no-install`을 붙입니다. 결과물은 `src-tauri/target/release/bundle/macos/`에 생깁니다.
 
 ## 권한
 
@@ -59,7 +59,7 @@ Windows 앱은 Tauri 2 앱입니다. 화면(Vue)은 실행 파일 안에 압축�
 
 | 부분 | 파일 |
 |---|---|
-| 화면이 부르는 명령 51개, 창, 메뉴, 저장 | `src-tauri/src/lib.rs` |
+| 화면이 부르는 명령, 창, 메뉴, 저장 | `src-tauri/src/lib.rs` |
 | 전역 키보드·마우스 (CGEventTap, 리스닝 전용) | `src-tauri/src/input.rs` |
 | 실시간 서버 웹소켓 중계 | `src-tauri/src/ws_proxy.rs` |
 | 설치 파일 해제, 자원 추출 | `tools/extract_payload.py`, `tools/extract_assets.py` |
@@ -73,6 +73,8 @@ Windows 앱은 Tauri 2 앱입니다. 화면(Vue)은 실행 파일 안에 압축�
 - **클릭 통과와 포커스:** 화면 전체를 덮는 투명 창이, 화면이 알려 준 펫 영역 위에서만 클릭을 받습니다. macOS는 클릭한 앱을 앞으로 가져오므로, 펫을 클릭한 직후 키보드 포커스를 원래 앱에 돌려줍니다. 그래서 게임이나 편집기에 이어서 치는 글자가 사라지지 않습니다.
 - **기타:**
   - 업데이트 파일이 Windows 설치 파일이라 앱 안에서 바로 설치하지 않습니다. 대신 쿠로의 업데이트 창 자리에 다시 빌드하라는 안내를 띄웁니다.
+  - **단축키(1.0.3부터):** 설정에서 정하는 단축키(기본 F7 게임 모드, F8 화면 전환, F9 펫 숨기기)는 전역 키 입력 감시로 처리합니다. Windows처럼 키를 가로채지는 않아서, 누른 키는 앞에 있는 앱에도 그대로 전달됩니다. 설정 화면의 "Win" 키는 Mac의 Command 키입니다.
+  - "작업 표시줄 아이콘 표시" 설정은 macOS에서 아무 효과가 없습니다. 이 앱은 Dock에 아이콘을 띄우지 않습니다.
   - 패널을 접었을 때의 폭(112px)은 CSS를 보고 정한 추정값입니다.
   - 메뉴 막대 아이콘이 많으면 트레이 아이콘이 MacBook 노치 뒤에 가려질 수 있습니다. 같은 메뉴를 펫 우클릭으로도 열 수 있습니다.
 

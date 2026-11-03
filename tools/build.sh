@@ -66,9 +66,13 @@ fi
 
 echo "==> extracting frontend from $(basename "$EXE")"
 python3 -I tools/extract_payload.py "$EXE" "$WORK/inner.exe" "$WORK/version.txt"
-7zz x -y -o"$WORK/nsis" "$WORK/inner.exe" WuwaTappo.exe >/dev/null
+7zz x -y -o"$WORK/nsis" "$WORK/inner.exe" >/dev/null || true  # warns about the trailing signature data
+# The main binary is WuwaTappo.exe in 1.0.0 but an unnamed entry (`$_21_`) from 1.0.3: take the largest
+# file outside the installer's own plugin folder.
+MAIN_EXE="$(find "$WORK/nsis" -type f ! -path '*/$PLUGINSDIR/*' -exec ls -S {} + | head -1)"
+[ -n "$MAIN_EXE" ] || { echo "no application binary found in the installer" >&2; exit 1; }
 rm -rf web && mkdir web
-python3 -I tools/extract_assets.py "$WORK/nsis/WuwaTappo.exe" web
+python3 -I tools/extract_assets.py "$MAIN_EXE" web
 
 echo "==> patching and checking"
 python3 -I tools/patch_frontend.py web

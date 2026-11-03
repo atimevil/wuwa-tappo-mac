@@ -5,7 +5,7 @@
 
 use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoop};
 use core_graphics::event::{
-    CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType, EventField,
+    CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType, EventField,
 };
 use serde_json::json;
 use std::collections::HashSet;
@@ -73,6 +73,11 @@ fn run_tap(app: &AppHandle) -> bool {
                     }
                     let code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
                     let name = key_name(code);
+                    if matches!(ty, KeyDown) {
+                        if let Some(vk) = windows_vk(&name) {
+                            crate::trigger_shortcut(app, shortcut_modifiers(event.get_flags()), vk);
+                        }
+                    }
                     let ev = if matches!(ty, KeyDown) { "key-press" } else { "key-release" };
                     let _ = app.emit(ev, name);
                 }
@@ -165,8 +170,57 @@ fn key_name(code: i64) -> String {
     s.to_string()
 }
 
+/// Modifier bits the frontend stores for shortcuts: Alt 1, Ctrl 2, Shift 4, Win 8 (Command on a Mac).
+fn shortcut_modifiers(f: CGEventFlags) -> u64 {
+    [
+        (CGEventFlags::CGEventFlagAlternate, 1),
+        (CGEventFlags::CGEventFlagControl, 2),
+        (CGEventFlags::CGEventFlagShift, 4),
+        (CGEventFlags::CGEventFlagCommand, 8),
+    ]
+    .iter()
+    .filter(|(flag, _)| f.contains(*flag))
+    .map(|(_, bit)| bit)
+    .sum()
+}
+
+/// rdev-style key name -> Windows virtual-key code, for the keys the settings page can bind.
+fn windows_vk(name: &str) -> Option<u64> {
+    if let Some(c) = name.strip_prefix("Key").filter(|c| c.len() == 1) {
+        return Some(c.as_bytes()[0] as u64);
+    }
+    if let Some(d) = name.strip_prefix("Num").and_then(|d| d.parse::<u64>().ok()) {
+        return Some(48 + d);
+    }
+    if let Some(n) = name.strip_prefix('F').and_then(|n| n.parse::<u64>().ok()) {
+        return Some(111 + n);
+    }
+    Some(match name {
+        "Space" => 32, "PageUp" => 33, "PageDown" => 34, "End" => 35, "Home" => 36,
+        "LeftArrow" => 37, "UpArrow" => 38, "RightArrow" => 39, "DownArrow" => 40,
+        "Insert" => 45, "Delete" => 46, "SemiColon" => 186, "Equal" => 187, "Comma" => 188,
+        "Minus" => 189, "Dot" => 190, "Slash" => 191, "BackQuote" => 192, "LeftBracket" => 219,
+        "BackSlash" => 220, "RightBracket" => 221, "Quote" => 222,
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shortcut_keys_match_frontend_codes() {
+        // DEFAULT_APP_SHORTCUTS: F7 118, F8 119, F9 120; letters and digits are ASCII.
+        assert_eq!(super::windows_vk(&super::key_name(98)), Some(118));
+        assert_eq!(super::windows_vk(&super::key_name(100)), Some(119));
+        assert_eq!(super::windows_vk(&super::key_name(101)), Some(120));
+        assert_eq!(super::windows_vk(&super::key_name(0)), Some(65));
+        assert_eq!(super::windows_vk(&super::key_name(29)), Some(48));
+        assert_eq!(super::windows_vk(&super::key_name(41)), Some(186));
+        assert_eq!(super::windows_vk("ShiftLeft"), None);
+        use core_graphics::event::CGEventFlags as F;
+        assert_eq!(super::shortcut_modifiers(F::CGEventFlagCommand | F::CGEventFlagShift), 12);
+    }
+
     #[test]
     fn hotkey_names_match_frontend() {
         // Frontend hotkeys compare against "F4" / "F5" / "F9".

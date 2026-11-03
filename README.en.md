@@ -75,6 +75,7 @@ The Windows app is a Tauri 2 app. Its frontend (Vue) is compressed inside the ex
   - The update files are Windows installers, so the app does not install them. Where Kuro's update window would open, the app shows a notice to rebuild instead.
   - **Shortcuts (from 1.0.3):** the shortcuts set in Settings (by default F7 game mode, F8 switch screen, F9 hide pet) are handled by the global key listener. Unlike on Windows the key is not captured, so the app in front receives it too. "Win" in Settings means the Command key on a Mac.
   - The "Show taskbar icon" setting has no effect on macOS. This app never shows a Dock icon.
+  - **App log:** frontend warnings and errors go to `~/Library/Logs/io.github.atimevil.wuwatappo-mac/`, except one pair: the `invalid key: #device_id` warning and the format warning after it, which Kuro's analytics produces on every event. Kuro's own analytics SDK objects to the `#` in the name; the event is still sent.
   - The collapsed panel width (112px) is an estimate taken from the CSS.
   - With many menu bar icons, the tray icon can be hidden behind the MacBook notch. The same menu also opens when you right-click the pet.
 

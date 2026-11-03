@@ -805,8 +805,43 @@ const INPUT_MONITORING_PANE: &str = "x-apple.systempreferences:com.apple.prefere
 
 /// Called from the input thread when Input Monitoring is still missing after the system request.
 pub(crate) fn explain_input_monitoring(app: &AppHandle) {
-    let (title, body, open, later) = if korean_ui(app) {
-        (
+    let [title, body, open, later] = permission_text(&ui_locale(app));
+    if front_dialog(app, title, body, open, later) {
+        let _ = std::process::Command::new("open").arg(INPUT_MONITORING_PANE).status();
+    }
+}
+
+/// The language chosen in the app (frontend codes: en tw jp kr fr de es pt th); before the frontend
+/// has saved one (the permission dialog can come first), the system language.
+fn ui_locale(app: &AppHandle) -> String {
+    if let Some(l) = read_store(app)["locale"].as_str() {
+        return l.to_string();
+    }
+    let out = std::process::Command::new("defaults").args(["read", "-g", "AppleLanguages"]).output();
+    let langs = out.map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+    // Output looks like `(\n    "ko-KR",\n    en\n)`: the first entry, quoted or not.
+    let first = langs.lines().nth(1).unwrap_or("").trim().trim_end_matches(',').trim_matches('"');
+    locale_from_system(first).to_string()
+}
+
+fn locale_from_system(lang: &str) -> &'static str {
+    match lang.split(['-', '_']).next().unwrap_or("") {
+        "ko" => "kr",
+        "ja" => "jp",
+        "zh" => "tw",
+        "fr" => "fr",
+        "de" => "de",
+        "es" => "es",
+        "pt" => "pt",
+        "th" => "th",
+        _ => "en",
+    }
+}
+
+/// [title, body, open button, later button]
+fn permission_text(locale: &str) -> [&'static str; 4] {
+    match locale {
+        "kr" => [
             "입력 모니터링 권한이 필요합니다",
             "Wuwa Tappo가 키 입력과 클릭을 세려면 입력 모니터링 권한이 필요합니다.\n\n\
              '설정 열기'를 누른 뒤 목록에서 Wuwa Tappo를 켜 주세요. 목록에 없으면 아래 '+'를 눌러 \
@@ -814,9 +849,75 @@ pub(crate) fn explain_input_monitoring(app: &AppHandle) {
              이전 빌드의 항목이니 '−'로 지우고 다시 추가하세요. 켜면 앱이 다시 시작됩니다.",
             "설정 열기",
             "나중에",
-        )
-    } else {
-        (
+        ],
+        "jp" => [
+            "入力監視の許可が必要です",
+            "Wuwa Tappo がキー入力とクリックを数えるには、入力監視の許可が必要です。\n\n\
+             「設定を開く」を押して、一覧の Wuwa Tappo をオンにしてください。一覧にない場合は、下の「+」を押して\
+             アプリケーションフォルダの Wuwa Tappo を追加してください。すでにオンなのにこの画面が出る場合は\
+             以前のビルドの項目なので、「−」で削除してからもう一度追加してください。オンにするとアプリが再起動します。",
+            "設定を開く",
+            "後で",
+        ],
+        "tw" => [
+            "需要「輸入監控」權限",
+            "Wuwa Tappo 需要「輸入監控」權限才能計算按鍵與點擊次數。\n\n\
+             請按「打開設定」，然後在列表中開啟 Wuwa Tappo。若列表中沒有，請按下方的「+」，從「應用程式」\
+             資料夾加入 Wuwa Tappo。若已開啟卻仍看到此視窗，表示那是舊版建置的項目，請用「−」移除後再重新加入。\
+             開啟後 App 會重新啟動。",
+            "打開設定",
+            "稍後",
+        ],
+        "fr" => [
+            "Autorisation « Surveillance de l'entrée » requise",
+            "Wuwa Tappo a besoin de la surveillance de l'entrée pour compter les frappes et les clics.\n\n\
+             Cliquez sur « Ouvrir les réglages » et activez Wuwa Tappo. S'il n'apparaît pas, cliquez sur « + » \
+             et ajoutez Wuwa Tappo depuis le dossier Applications. S'il est déjà activé et que ce message \
+             s'affiche encore, l'entrée vient d'une version précédente : supprimez-la avec « − » puis \
+             ajoutez-la de nouveau. L'app redémarre une fois l'autorisation activée.",
+            "Ouvrir les réglages",
+            "Plus tard",
+        ],
+        "de" => [
+            "Berechtigung „Eingabeüberwachung“ erforderlich",
+            "Wuwa Tappo benötigt die Eingabeüberwachung, um Tastenanschläge und Klicks zu zählen.\n\n\
+             Klicke auf „Einstellungen öffnen“ und aktiviere Wuwa Tappo. Falls es nicht aufgeführt ist, klicke \
+             auf „+“ und füge Wuwa Tappo aus dem Ordner „Programme“ hinzu. Wenn es bereits aktiviert ist und du \
+             diese Meldung trotzdem siehst, gehört der Eintrag zu einem früheren Build: Entferne ihn mit „−“ \
+             und füge ihn erneut hinzu. Nach dem Aktivieren startet die App neu.",
+            "Einstellungen öffnen",
+            "Später",
+        ],
+        "es" => [
+            "Se necesita el permiso de Monitorización de entrada",
+            "Wuwa Tappo necesita la Monitorización de entrada para contar las pulsaciones de teclas y los clics.\n\n\
+             Haz clic en «Abrir Ajustes» y activa Wuwa Tappo. Si no aparece en la lista, haz clic en «+» y añade \
+             Wuwa Tappo desde la carpeta Aplicaciones. Si ya está activado y sigues viendo este aviso, esa \
+             entrada es de una compilación anterior: elimínala con «−» y vuelve a añadirla. La app se reinicia \
+             al activarlo.",
+            "Abrir Ajustes",
+            "Más tarde",
+        ],
+        "pt" => [
+            "Permissão de Monitoramento de Entrada necessária",
+            "O Wuwa Tappo precisa do Monitoramento de Entrada para contar as teclas pressionadas e os cliques.\n\n\
+             Clique em \"Abrir Ajustes\" e ative o Wuwa Tappo. Se ele não estiver na lista, clique em \"+\" e \
+             adicione o Wuwa Tappo da pasta Aplicativos. Se já estiver ativado e esta mensagem continuar \
+             aparecendo, o item é de uma versão anterior: remova-o com \"−\" e adicione-o novamente. O app \
+             reinicia depois que você ativar.",
+            "Abrir Ajustes",
+            "Mais tarde",
+        ],
+        "th" => [
+            "ต้องการสิทธิ์การตรวจสอบการป้อนข้อมูล",
+            "Wuwa Tappo ต้องใช้สิทธิ์การตรวจสอบการป้อนข้อมูลเพื่อนับการกดแป้นและการคลิก\n\n\
+             คลิก \"เปิดการตั้งค่า\" แล้วเปิด Wuwa Tappo ในรายการ หากไม่มีในรายการ ให้คลิก \"+\" แล้วเพิ่ม \
+             Wuwa Tappo จากโฟลเดอร์แอปพลิเคชัน หากเปิดอยู่แล้วแต่ยังเห็นหน้าต่างนี้ แสดงว่าเป็นรายการของบิลด์ก่อนหน้า \
+             ให้ลบด้วย \"−\" แล้วเพิ่มใหม่ แอปจะรีสตาร์ทหลังจากเปิดสิทธิ์",
+            "เปิดการตั้งค่า",
+            "ภายหลัง",
+        ],
+        _ => [
             "Input Monitoring permission needed",
             "Wuwa Tappo needs Input Monitoring to count key presses and clicks.\n\n\
              Click 'Open Settings' and turn on Wuwa Tappo. If it is not listed, click '+' and add \
@@ -825,15 +926,85 @@ pub(crate) fn explain_input_monitoring(app: &AppHandle) {
              The app restarts after you turn it on.",
             "Open Settings",
             "Later",
-        )
-    };
-    if front_dialog(app, title, body, open, later) {
-        let _ = std::process::Command::new("open").arg(INPUT_MONITORING_PANE).status();
+        ],
     }
 }
 
-fn korean_ui(app: &AppHandle) -> bool {
-    read_store(app)["locale"].as_str().map_or(true, |l| l == "kr")
+/// [title, body with {latest}/{current}, open button, close button]
+fn update_text(locale: &str) -> [&'static str; 4] {
+    match locale {
+        "kr" => [
+            "새 버전이 나왔습니다",
+            "Wuwa Tappo {latest}이(가) 나왔습니다. 지금 앱은 {current}입니다.\n\n\
+             macOS용은 자동으로 업데이트되지 않습니다. 저장소 폴더에서 tools/build.sh를 \
+             다시 실행하면 새 버전을 받아 다시 빌드합니다.",
+            "GitHub 열기",
+            "닫기",
+        ],
+        "jp" => [
+            "新しいバージョンがあります",
+            "Wuwa Tappo {latest} が公開されました。現在のアプリは {current} です。\n\n\
+             macOS 版は自動では更新されません。リポジトリのフォルダで tools/build.sh をもう一度実行すると、\
+             新しいバージョンをダウンロードしてビルドし直します。",
+            "GitHub を開く",
+            "閉じる",
+        ],
+        "tw" => [
+            "有新版本",
+            "Wuwa Tappo {latest} 已推出，目前的 App 為 {current}。\n\n\
+             macOS 版不會自動更新。請在儲存庫資料夾中再次執行 tools/build.sh，即可下載並重新建置新版本。",
+            "開啟 GitHub",
+            "關閉",
+        ],
+        "fr" => [
+            "Une nouvelle version est disponible",
+            "Wuwa Tappo {latest} est sorti. Cette app est en version {current}.\n\n\
+             La version macOS ne se met pas à jour toute seule. Relancez tools/build.sh dans le dossier \
+             du dépôt pour télécharger et recompiler la nouvelle version.",
+            "Ouvrir GitHub",
+            "Fermer",
+        ],
+        "de" => [
+            "Eine neue Version ist verfügbar",
+            "Wuwa Tappo {latest} ist erschienen. Diese App ist Version {current}.\n\n\
+             Die macOS-Version aktualisiert sich nicht selbst. Führe tools/build.sh im Repository-Ordner \
+             erneut aus, um die neue Version herunterzuladen und neu zu bauen.",
+            "GitHub öffnen",
+            "Schließen",
+        ],
+        "es" => [
+            "Hay una nueva versión disponible",
+            "Ya está disponible Wuwa Tappo {latest}. Esta app es la versión {current}.\n\n\
+             La versión para macOS no se actualiza sola. Vuelve a ejecutar tools/build.sh en la carpeta \
+             del repositorio para descargar y compilar la nueva versión.",
+            "Abrir GitHub",
+            "Cerrar",
+        ],
+        "pt" => [
+            "Uma nova versão está disponível",
+            "O Wuwa Tappo {latest} foi lançado. Este app está na versão {current}.\n\n\
+             A versão para macOS não se atualiza sozinha. Execute tools/build.sh novamente na pasta do \
+             repositório para baixar e compilar a nova versão.",
+            "Abrir GitHub",
+            "Fechar",
+        ],
+        "th" => [
+            "มีเวอร์ชันใหม่",
+            "Wuwa Tappo {latest} เปิดตัวแล้ว แอปนี้เป็นเวอร์ชัน {current}\n\n\
+             เวอร์ชัน macOS ไม่อัปเดตเอง ให้เรียกใช้ tools/build.sh อีกครั้งในโฟลเดอร์ของรีโพสิทอรี\
+             เพื่อดาวน์โหลดและบิลด์เวอร์ชันใหม่",
+            "เปิด GitHub",
+            "ปิด",
+        ],
+        _ => [
+            "A new version is available",
+            "Wuwa Tappo {latest} has been released. This app is {current}.\n\n\
+             The macOS build does not update itself. Run tools/build.sh again in the \
+             repository folder to download and rebuild the new version.",
+            "Open GitHub",
+            "Close",
+        ],
+    }
 }
 
 /// Two-button alert brought to the front; true when the first button is chosen. Blocks, so call
@@ -887,35 +1058,14 @@ pub(crate) fn notify_if_update_available(app: &AppHandle) {
     let Some(manifest) = fetch_json(manifest_url) else { return };
     let Some(latest) = manifest["version"].as_str().map(str::to_string) else { return };
     let current = app.package_info().version.to_string();
-    if !is_newer(&latest, &current) || read_store(app)["update_notified"].as_str() == Some(latest.as_str()) {
+    // Shown on every launch while outdated (the check runs once per launch), so a missed notice comes back.
+    if !is_newer(&latest, &current) {
         return;
     }
     log::info!("[update] Kuro released {latest} (this build: {current})");
-    let _ = update_store(app, |v| v["update_notified"] = json!(latest));
-    let (title, body, open, close) = if korean_ui(app) {
-        (
-            "새 버전이 나왔습니다".to_string(),
-            format!(
-                "Wuwa Tappo {latest}이(가) 나왔습니다. 지금 앱은 {current}입니다.\n\n\
-                 macOS용은 자동으로 업데이트되지 않습니다. 저장소 폴더에서 tools/build.sh를 \
-                 다시 실행하면 새 버전을 받아 다시 빌드합니다."
-            ),
-            "GitHub 열기",
-            "닫기",
-        )
-    } else {
-        (
-            "A new version is available".to_string(),
-            format!(
-                "Wuwa Tappo {latest} has been released. This app is {current}.\n\n\
-                 The macOS build does not update itself. Run tools/build.sh again in the \
-                 repository folder to download and rebuild the new version."
-            ),
-            "Open GitHub",
-            "Close",
-        )
-    };
-    if front_dialog(app, &title, &body, open, close) {
+    let [title, body, open, close] = update_text(&ui_locale(app));
+    let body = body.replace("{latest}", &latest).replace("{current}", &current);
+    if front_dialog(app, title, &body, open, close) {
         let _ = std::process::Command::new("open").arg(REPO_URL).status();
     }
 }
@@ -1158,6 +1308,20 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::Rect;
+
+    #[test]
+    fn dialogs_cover_every_app_language() {
+        // The frontend's GLOBAL_LOCALE_OPTIONS.
+        for l in ["tw", "jp", "kr", "fr", "de", "es", "pt", "th"] {
+            assert_ne!(super::permission_text(l), super::permission_text("en"), "{l}");
+            assert_ne!(super::update_text(l), super::update_text("en"), "{l}");
+            assert!(super::update_text(l)[1].contains("{latest}") && super::update_text(l)[1].contains("{current}"), "{l}");
+        }
+        assert_eq!(super::locale_from_system("ko-KR"), "kr");
+        assert_eq!(super::locale_from_system("zh-Hant-TW"), "tw");
+        assert_eq!(super::locale_from_system("pt-BR"), "pt");
+        assert_eq!(super::locale_from_system("it"), "en");
+    }
 
     #[test]
     fn version_comparison() {

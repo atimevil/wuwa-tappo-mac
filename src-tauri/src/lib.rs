@@ -48,10 +48,22 @@ const CONSOLE_BRIDGE_SCRIPT: &str = r#"
     if (a instanceof Error) return a.stack || a.message;
     try { return JSON.stringify(a); } catch { return String(a); }
   };
+  // Kuro's analytics names a property '#device_id' and its own SDK warns about the '#' on every event
+  // (the event is still sent). Same on Windows; keep the pair out of the app log, which it floods.
+  let skipFormatWarning = false;
+  const isNoise = (raw) => {
+    const msg = raw.replace(/^"|"$/g, ''); // the SDK logs String objects, which fmt JSON-quotes
+    if (msg === 'invalid key: #device_id') return (skipFormatWarning = true);
+    const follow = skipFormatWarning && msg.startsWith('Please check the parameter format, the key of properties');
+    skipFormatWarning = false;
+    return follow;
+  };
   const send = (level, args) => {
     try {
+      const msg = args.map(fmt).join(' ');
+      if (isNoise(msg)) return;
       window.__TAURI_INTERNALS__.invoke('write_app_log', {
-        level, message: '[console:' + location.hash + '] ' + args.map(fmt).join(' ').slice(0, 2000),
+        level, message: '[console:' + location.hash + '] ' + msg.slice(0, 2000),
       });
     } catch {}
   };

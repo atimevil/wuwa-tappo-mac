@@ -72,13 +72,13 @@ The Windows app is a Tauri 2 app. Its frontend (Vue) is compressed inside the ex
 - **Window-open events:** some windows, such as the login window, render only after they receive an event. For those windows the host sends the event after the page has registered its listener (patch 1).
 - **Click-through and focus:** a transparent window covers the whole screen and accepts clicks only over the pet regions that the frontend reports. macOS brings a clicked app to the front, so after a click on the pet the keyboard focus is handed back to the previous app. Keystrokes typed into a game or editor right afterwards are therefore not lost.
 - **Other:**
-  - Auto-update is turned off, because the update files are Windows installers.
+  - The update files are Windows installers, so the app does not install them. Where Kuro's update window would open, the app shows a notice to rebuild instead.
   - The collapsed panel width (112px) is an estimate taken from the CSS.
   - With many menu bar icons, the tray icon can be hidden behind the MacBook notch. The same menu also opens when you right-click the pet.
 
 ## When a new version comes out
 
-The macOS app does not update itself, because Kuro's update files are Windows installers. Instead, at startup the app checks Kuro's release manifest and, when a newer version exists, shows a notice at every launch until you rebuild. Run `tools/build.sh` again then to rebuild with the latest installer. Until then the existing app keeps working for as long as the server accepts it.
+The macOS app does not update itself, because Kuro's update files are Windows installers. Instead, the app checks Kuro's release manifest at startup, every 30 minutes, and when you click "Check for updates" in Settings. When a newer version exists, it shows a notice at every launch until you rebuild. Run `tools/build.sh` again then to rebuild with the latest installer. Until then the existing app keeps working for as long as the server accepts it.
 
 The patches locate their targets with regular expressions that tolerate renamed minified identifiers, so most new versions build as is. If a patch reports "NOT FOUND" or the contract check fails, the structure of the frontend code has changed. Update the patterns in `tools/patch_frontend.py` and the command list in `src-tauri/src/lib.rs` to match the new version.
 

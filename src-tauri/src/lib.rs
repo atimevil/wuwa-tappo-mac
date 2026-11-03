@@ -347,11 +347,15 @@ fn resize_login_window_to_content(app: AppHandle, payload: SizePayload) -> Resul
     w.center().map_err(|e| e.to_string())
 }
 
+/// Kuro's update window offers "update now", which runs the Windows updater; on macOS show the
+/// rebuild notice instead. The frontend calls this from the settings "check for updates" button
+/// and from its silent check (at startup and every 30 minutes, once per version per session).
 #[tauri::command]
-fn open_update_window(app: AppHandle, detail: Option<Value>) -> Result<(), String> {
-    *app.state::<Shared>().update_detail.lock().unwrap() = detail.clone();
-    let aux = Aux { label: "update", route: "index.html#/update".into(), size: (960.0, 720.0) };
-    open_aux(&app, aux, Some(("update-modal-open", detail.unwrap_or(Value::Null)))).map(|_| ())
+fn open_update_window(app: AppHandle, detail: Option<Value>) {
+    let d = detail.unwrap_or(Value::Null);
+    let latest = d["newVersion"].as_str().unwrap_or("?").to_string();
+    let current = d["currentVersion"].as_str().map_or_else(|| app.package_info().version.to_string(), str::to_string);
+    std::thread::spawn(move || show_rebuild_notice(&app, &latest, &current));
 }
 
 #[tauri::command]
@@ -1052,19 +1056,15 @@ fn is_newer(latest: &str, current: &str) -> bool {
     matches!((parse_version(latest), parse_version(current)), (Some(l), Some(c)) if l > c)
 }
 
-pub(crate) fn notify_if_update_available(app: &AppHandle) {
-    let Some(host) = fetch_json(RELEASE_HOST_JSON) else { return };
-    let Some(manifest_url) = host["url"].as_str().filter(|u| u.starts_with(KURO_ASSETS_PREFIX)) else { return };
-    let Some(manifest) = fetch_json(manifest_url) else { return };
-    let Some(latest) = manifest["version"].as_str().map(str::to_string) else { return };
-    let current = app.package_info().version.to_string();
-    // Shown on every launch while outdated (the check runs once per launch), so a missed notice comes back.
-    if !is_newer(&latest, &current) {
-        return;
-    }
-    log::info!("[update] Kuro released {latest} (this build: {current})");
+fn latest_manifest() -> Option<Value> {
+    let host = fetch_json(RELEASE_HOST_JSON)?;
+    let manifest_url = host["url"].as_str().filter(|u| u.starts_with(KURO_ASSETS_PREFIX))?;
+    fetch_json(manifest_url)
+}
+
+fn show_rebuild_notice(app: &AppHandle, latest: &str, current: &str) {
     let [title, body, open, close] = update_text(&ui_locale(app));
-    let body = body.replace("{latest}", &latest).replace("{current}", &current);
+    let body = body.replace("{latest}", latest).replace("{current}", current);
     if front_dialog(app, title, &body, open, close) {
         let _ = std::process::Command::new("open").arg(REPO_URL).status();
     }
@@ -1091,11 +1091,27 @@ fn get_track_os_info() -> Value {
     json!({ "os": "macOS", "osVersion": ver })
 }
 
-/// Self-update is Windows-only (the published update feed ships Windows installers).
+/// Answers the frontend's updater check from Kuro's release manifest. The frontend then opens the
+/// update window, which on macOS is the rebuild notice (see open_update_window); `rid` is never used
+/// because nothing is downloaded. The endpoint from the page is ignored: only Kuro's fixed URL is fetched.
 #[tauri::command]
-fn check_app_update(endpoint: Option<String>) -> Option<Value> {
+async fn check_app_update(app: AppHandle, endpoint: Option<String>) -> Option<Value> {
     let _ = endpoint;
-    None
+    let manifest = tauri::async_runtime::spawn_blocking(latest_manifest).await.ok()??;
+    let latest = manifest["version"].as_str()?.to_string();
+    let current = app.package_info().version.to_string();
+    if !is_newer(&latest, &current) {
+        return None;
+    }
+    log::info!("[update] Kuro released {latest} (this build: {current})");
+    Some(json!({
+        "rid": 0,
+        "currentVersion": current,
+        "version": latest,
+        "date": manifest["pub_date"],
+        "body": manifest["notes"],
+        "rawJson": manifest,
+    }))
 }
 
 #[tauri::command]
@@ -1241,10 +1257,6 @@ pub fn run() {
                 .build(app)?;
             app.on_menu_event(|app, event| on_menu(app, event.id().as_ref()));
             input::spawn(handle.clone());
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs(20));
-                notify_if_update_available(&handle);
-            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

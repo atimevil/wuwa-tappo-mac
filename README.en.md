@@ -2,13 +2,13 @@
 
 [한국어](README.md) | **English**
 
-An unofficial host that runs **Wuwa Tappo**, the Windows-only desktop pet for Wuthering Waves (WuWa), on a Mac (macOS, Apple Silicon or Intel).
+An unofficial host that runs **Wuwa Tappo**, the Windows-only desktop pet for Wuthering Waves (WuWa), on a Mac.
 
 This repository contains **no** Kuro Games frontend code or art. `tools/build.sh` downloads the official Windows installer from Kuro's server and verifies Kuro's signature. It then extracts the frontend from the installer and builds it into a macOS app (`Wuwa Tappo.app`). The repository itself contains a Tauri host that re-implements, for macOS, everything the frontend calls (windows, global input, tray, storage, and so on), plus the extraction, patching, and checking tools.
 
 ## Requirements
 
-- An Apple Silicon or Intel Mac running macOS 11 or later
+- An Apple Silicon Mac (tested on macOS 26)
 - Xcode Command Line Tools: `xcode-select --install`
 - Homebrew packages: `brew install sevenzip brotli minisign rustup`
 - Rust and the Tauri CLI:
@@ -73,7 +73,7 @@ The Windows app is a Tauri 2 app. Its frontend (Vue) is compressed inside the ex
 - **Click-through and focus:** a transparent window covers the whole screen and accepts clicks only over the pet regions that the frontend reports. macOS brings a clicked app to the front, so after a click on the pet the keyboard focus is handed back to the previous app. Keystrokes typed into a game or editor right afterwards are therefore not lost. If the click opened the panel or the login window, the focus stays in that window.
 - **Other:**
   - The update files are Windows installers, so the app does not install them. Instead of Kuro's update window it shows an "Update Now" notice that rebuilds the app in Terminal (see "When a new version comes out").
-  - **Shortcuts (from 1.0.3):** the shortcuts set in Settings (by default F7 game mode, F8 switch screen, F9 hide pet) are handled by the global key listener. Unlike on Windows the key is not captured, so the app in front receives it too. "Win" in Settings means the Command key on a Mac. On Mac keyboards F7 to F9 are the previous track, play/pause and next track keys by default, so pressing them controls your music app instead of triggering the shortcut. Hold fn, turn on "Use F1, F2, etc. keys as standard function keys" in System Settings → Keyboard → Keyboard Shortcuts → Function Keys, or bind other keys in Settings. F13 to F20 can be bound too.
+  - **Shortcuts (from 1.0.3):** the shortcuts set in Settings (by default F7 game mode, F8 switch screen, F9 hide pet) are handled by the global key listener. The key is not captured, so the app in front receives it too. "Win" in Settings means the Command key on a Mac. On Mac keyboards F7 to F9 are the previous track, play/pause and next track keys by default, so pressing them controls your music app instead of triggering the shortcut. Hold fn, or bind other keys in Settings.
   - The "Show Taskbar Icon" setting has no effect on macOS. This app never shows a Dock icon.
   - **App log:** frontend warnings and errors go to `~/Library/Logs/io.github.atimevil.wuwatappo-mac/`, except one pair: the `invalid key: #device_id` warning and the format warning after it, which Kuro's analytics produces on every event. Kuro's own analytics SDK objects to the `#` in the name; the event is still sent.
   - The collapsed panel width (112px) is an estimate taken from the CSS.

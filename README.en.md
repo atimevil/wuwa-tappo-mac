@@ -38,7 +38,7 @@ To use an installer you already downloaded, pass its path, for example `tools/bu
 
 ## Permissions
 
-To count key presses and clicks, Wuwa Tappo needs **System Settings → Privacy & Security → Input Monitoring**. When you turn it on, macOS quits the app once; open it again.
+To count key presses and clicks and to receive its shortcuts, Wuwa Tappo needs **System Settings → Privacy & Security → Input Monitoring**. When you turn it on, macOS quits the app once; open it again.
 
 macOS shows its permission prompt only once per app, and if you miss it the app may not appear in the Settings list at all. So whenever the permission is missing, the app shows its own dialog at startup. Click "Open Settings" in that dialog and turn on Wuwa Tappo in the list. If it is not listed, click "+" below the list and add Wuwa Tappo from the Applications folder.
 
@@ -68,20 +68,20 @@ The Windows app is a Tauri 2 app. Its frontend (Vue) is compressed inside the ex
 ### Differences from Windows
 
 - **Cookies:** the frontend is served from `tauri://localhost`, where WebKit keeps no cookies. The login token lives in a cookie, so every window replaces `document.cookie` with a localStorage-backed store.
-- **Realtime server (socket.io):** the server accepts WebSocket connections only from the `http(s)://tauri.localhost` origin or with no Origin header. WebSockets to that server therefore go through a loopback relay (127.0.0.1) inside the app. The relay changes only the Host and Origin of the upgrade request and passes the TLS connection through unchanged.
+- **Realtime server (socket.io):** the server accepts WebSocket connections only from the `http(s)://tauri.localhost` origin or with no Origin header. The frontend therefore connects WebSockets for that server to a loopback relay inside the app (`ws://127.0.0.1`). The relay rewrites the Host and Origin of the upgrade request, opens its own TLS connection to the server, and from then on passes the data through unchanged. The only unencrypted hop is the loopback inside this Mac.
 - **Window-open events:** some windows, such as the login window, render only after they receive an event. For those windows the host sends the event after the page has registered its listener (patch 1).
-- **Click-through and focus:** a transparent window covers the whole screen and accepts clicks only over the pet regions that the frontend reports. macOS brings a clicked app to the front, so after a click on the pet the keyboard focus is handed back to the previous app. Keystrokes typed into a game or editor right afterwards are therefore not lost.
+- **Click-through and focus:** a transparent window covers the whole screen and accepts clicks only over the pet regions that the frontend reports. macOS brings a clicked app to the front, so after a click on the pet the keyboard focus is handed back to the previous app. Keystrokes typed into a game or editor right afterwards are therefore not lost. If the click opened the panel or the login window, the focus stays in that window.
 - **Other:**
   - The update files are Windows installers, so the app does not install them. Instead of Kuro's update window it shows an "Update Now" notice that rebuilds the app in Terminal (see "When a new version comes out").
-  - **Shortcuts (from 1.0.3):** the shortcuts set in Settings (by default F7 game mode, F8 switch screen, F9 hide pet) are handled by the global key listener. Unlike on Windows the key is not captured, so the app in front receives it too. "Win" in Settings means the Command key on a Mac. On Mac keyboards F7 to F9 are media keys by default, so pressing them plays music instead of triggering the shortcut. Hold fn, turn on "Use F1, F2, etc. keys as standard function keys" in System Settings → Keyboard → Keyboard Shortcuts → Function Keys, or bind other keys in Settings. F13 to F20 can be bound too.
-  - The "Show taskbar icon" setting has no effect on macOS. This app never shows a Dock icon.
+  - **Shortcuts (from 1.0.3):** the shortcuts set in Settings (by default F7 game mode, F8 switch screen, F9 hide pet) are handled by the global key listener. Unlike on Windows the key is not captured, so the app in front receives it too. "Win" in Settings means the Command key on a Mac. On Mac keyboards F7 to F9 are the previous track, play/pause and next track keys by default, so pressing them controls your music app instead of triggering the shortcut. Hold fn, turn on "Use F1, F2, etc. keys as standard function keys" in System Settings → Keyboard → Keyboard Shortcuts → Function Keys, or bind other keys in Settings. F13 to F20 can be bound too.
+  - The "Show Taskbar Icon" setting has no effect on macOS. This app never shows a Dock icon.
   - **App log:** frontend warnings and errors go to `~/Library/Logs/io.github.atimevil.wuwatappo-mac/`, except one pair: the `invalid key: #device_id` warning and the format warning after it, which Kuro's analytics produces on every event. Kuro's own analytics SDK objects to the `#` in the name; the event is still sent.
   - The collapsed panel width (112px) is an estimate taken from the CSS.
   - With many menu bar icons, the tray icon can be hidden behind the MacBook notch. The same menu also opens when you right-click the pet.
 
 ## When a new version comes out
 
-Kuro's update files are Windows installers, so they cannot be installed as is. Instead, the app checks Kuro's release manifest at startup, every 30 minutes, and when you click "Check for updates" in Settings. When a newer version exists, it shows a notice at every launch until you rebuild.
+Kuro's update files are Windows installers, so they cannot be installed as is. Instead, the app checks Kuro's release manifest at startup, every 30 minutes, and when you click "Check for Updates" in Settings. When a newer version exists, it shows a notice at every launch until you rebuild.
 
 Click **Update Now** in the notice to open a Terminal window. In the repository folder the app was built from, it runs `git pull` to get the latest version of this port and then `tools/build.sh`. This takes a few minutes; when it finishes, the new version is installed and the app restarts. If you moved or deleted the repository folder, the button becomes "Open GitHub"; then run `tools/build.sh` from your clone yourself. Until you update, the existing app keeps working for as long as the server accepts it.
 

@@ -290,6 +290,7 @@ fn open_aux(app: &AppHandle, aux: Aux, event: Option<(&str, Value)>) -> Result<W
     };
     log::info!("[window] show {}", aux.label);
     w.show().map_err(|e| e.to_string())?;
+    AUX_SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let _ = w.unminimize();
     let _ = w.set_focus();
     if let Some((name, payload)) = event {
@@ -367,7 +368,15 @@ fn open_update_window(app: AppHandle, detail: Option<Value>) {
     let d = detail.unwrap_or(Value::Null);
     let latest = d["newVersion"].as_str().unwrap_or("?").to_string();
     let current = d["currentVersion"].as_str().map_or_else(|| app.package_info().version.to_string(), str::to_string);
-    std::thread::spawn(move || show_rebuild_notice(&app, &latest, &current));
+    static OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    // The silent check and the settings button can both ask while the notice is still up.
+    if OPEN.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        show_rebuild_notice(&app, &latest, &current);
+        OPEN.store(false, std::sync::atomic::Ordering::SeqCst);
+    });
 }
 
 #[tauri::command]
@@ -406,6 +415,7 @@ struct PanelPayload {
 fn open_panel_window(app: AppHandle, payload: PanelPayload) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("panel") {
         w.show().map_err(|e| e.to_string())?;
+        AUX_SHOWN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let _ = w.set_focus();
         if let Some(tab) = payload.tab {
             let _ = app.emit_to("panel", "panel-open-tab", tab);
@@ -552,7 +562,7 @@ fn shortcuts(app: &AppHandle) -> Value {
             });
             if let Some(saved) = read_store(app)["shortcuts"].as_object() {
                 for (k, b) in saved {
-                    if v.get(k).is_some() {
+                    if v.get(k).is_some() && valid_binding(b) {
                         v[k] = b.clone();
                     }
                 }
@@ -566,6 +576,10 @@ fn binding(b: &Value) -> (u64, u64) {
     (b["modifiers"].as_u64().unwrap_or(0), b["key"].as_u64().unwrap_or(0))
 }
 
+fn valid_binding(b: &Value) -> bool {
+    matches!((b["modifiers"].as_u64(), b["key"].as_u64()), (Some(m), Some(k)) if m <= 15 && k <= 255)
+}
+
 #[tauri::command]
 fn get_app_shortcuts(app: AppHandle) -> Value {
     shortcuts(&app)
@@ -573,18 +587,19 @@ fn get_app_shortcuts(app: AppHandle) -> Value {
 
 #[tauri::command]
 fn set_app_shortcuts(app: AppHandle, config: Value) -> Result<(), String> {
-    let map = config.as_object().ok_or("unavailable")?;
+    // Keep only the known actions, each a {modifiers, key} pair (key 0 = unbound).
+    let current = shortcuts(&app);
+    let mut clean = serde_json::Map::new();
     let mut seen = std::collections::HashSet::new();
-    for b in map.values() {
+    for action in current.as_object().into_iter().flat_map(|m| m.keys()) {
+        let b = config.get(action).filter(|b| valid_binding(b)).ok_or("unavailable")?;
         let (m, k) = binding(b);
-        if m > 15 || k > 255 {
-            return Err("unavailable".into());
-        }
         if k != 0 && !seen.insert((m, k)) {
             return Err("duplicate".into());
         }
+        clean.insert(action.clone(), json!({ "modifiers": m, "key": k }));
     }
-    update_store(&app, |v| v["shortcuts"] = config.clone())?;
+    update_store(&app, |v| v["shortcuts"] = Value::Object(clean))?;
     *SHORTCUTS.lock().unwrap() = None;
     let _ = app.emit("app-shortcuts-changed", shortcuts(&app));
     Ok(())
@@ -601,9 +616,17 @@ pub(crate) fn trigger_shortcut(app: &AppHandle, modifiers: u64, key: u64) {
     if SHORTCUT_CAPTURE.load(std::sync::atomic::Ordering::Relaxed) {
         return;
     }
-    let all = shortcuts(app);
-    let hit = all.as_object().and_then(|m| m.iter().find(|(_, b)| binding(b) == (modifiers, key) && key != 0));
-    if let Some((action, _)) = hit {
+    if key == 0 {
+        return;
+    }
+    if SHORTCUTS.lock().unwrap().is_none() {
+        shortcuts(app); // first key press after launch: load once from the store
+    }
+    // Look up under the lock without cloning: this runs inside the event tap callback.
+    let action = SHORTCUTS.lock().unwrap().as_ref().and_then(Value::as_object).and_then(|m| {
+        m.iter().find(|(_, b)| binding(b) == (modifiers, key)).map(|(a, _)| a.clone())
+    });
+    if let Some(action) = action {
         let _ = app.emit("app-shortcut", action);
     }
 }
@@ -630,8 +653,16 @@ fn get_main_desktop_safe_area(app: AppHandle) -> Result<Value, String> {
     }))
 }
 
-/// True when the frontmost other app has a normal-level window covering the whole main display
-/// (a full-screen game or video). shortcut: checks the main display only, not the pet's display.
+/// True when the frontmost other app has a normal-level window that exactly covers one display
+/// (a full-screen game or video), on any display.
+fn covers(w: &core_graphics::geometry::CGRect, d: &core_graphics::geometry::CGRect) -> bool {
+    let near = |a: f64, b: f64| (a - b).abs() < 1.0;
+    near(w.origin.x, d.origin.x)
+        && near(w.origin.y, d.origin.y)
+        && w.size.width >= d.size.width - 1.0
+        && w.size.height >= d.size.height - 1.0
+}
+
 fn foreground_app_fullscreen() -> bool {
     use core_foundation::base::{CFType, TCFType};
     use core_foundation::dictionary::CFDictionary;
@@ -647,7 +678,8 @@ fn foreground_app_fullscreen() -> bool {
     if pid == std::process::id() as i64 {
         return false;
     }
-    let screen = CGDisplay::main().bounds();
+    let screens: Vec<CGRect> =
+        CGDisplay::active_displays().unwrap_or_default().into_iter().map(|d| CGDisplay::new(d).bounds()).collect();
     let Some(list) = copy_window_info(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID) else {
         return false;
     };
@@ -658,9 +690,7 @@ fn foreground_app_fullscreen() -> bool {
             return false;
         }
         let bounds = d.find(CFString::from_static_string("kCGWindowBounds")).and_then(|v| v.downcast::<CFDictionary>());
-        bounds.and_then(|b| CGRect::from_dict_representation(&b)).is_some_and(|r| {
-            r.size.width >= screen.size.width && r.size.height >= screen.size.height
-        })
+        bounds.and_then(|b| CGRect::from_dict_representation(&b)).is_some_and(|r| screens.iter().any(|d| covers(&r, d)))
     })
 }
 
@@ -903,6 +933,9 @@ fn save_app_ui_locale(app: AppHandle, locale: String) -> Result<(), String> {
 
 /// The app that was frontmost when a click on the pet began (0 = none).
 static FOCUS_OWNER_PID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+/// Counts aux windows (panel, login, ...) shown, so a pet click that opened one keeps the focus there.
+static AUX_SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static AUX_SHOWN_AT_PRESS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Called on mouse-down over the pet, before macOS activates this app for the click.
 pub(crate) fn remember_focus_owner() {
@@ -910,13 +943,15 @@ pub(crate) fn remember_focus_owner() {
     let pid = front.map_or(0, |app| app.processIdentifier());
     let own = std::process::id() as i32;
     FOCUS_OWNER_PID.store(if pid == own { 0 } else { pid }, std::sync::atomic::Ordering::Relaxed);
+    AUX_SHOWN_AT_PRESS.store(AUX_SHOWN.load(std::sync::atomic::Ordering::Relaxed), std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Clicking a window of a background app makes macOS activate that app, so after a click on the pet
 /// the keyboard focus would stay here and the next keystrokes typed into the game or editor would be
 /// lost. Pet clicks are handled from the global event tap anyway, so hand focus back to the app that
 /// had it. macOS 14+ ignores a plain `deactivate`; activation must be yielded to a named app.
-/// A click that opens the panel or login window re-focuses it afterwards (open_aux calls set_focus).
+/// A click that opened the panel or login window keeps the focus there. The hand-back waits a moment
+/// so that the frontend's window-open call (made on the same mouse release) lands first.
 pub(crate) fn yield_focus_after_pet_click(app: &AppHandle) {
     let pid = FOCUS_OWNER_PID.swap(0, std::sync::atomic::Ordering::Relaxed);
     if pid == 0 {
@@ -924,9 +959,14 @@ pub(crate) fn yield_focus_after_pet_click(app: &AppHandle) {
     }
     let handle = app.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(30));
+        std::thread::sleep(std::time::Duration::from_millis(150));
         let _ = handle.run_on_main_thread(move || {
+            use objc2::runtime::NSObjectProtocol;
             use objc2_app_kit::{NSApplication, NSApplicationActivationOptions, NSRunningApplication};
+            let ord = std::sync::atomic::Ordering::Relaxed;
+            if AUX_SHOWN.load(ord) != AUX_SHOWN_AT_PRESS.load(ord) {
+                return;
+            }
             let (Some(mtm), Some(owner)) = (
                 objc2::MainThreadMarker::new(),
                 NSRunningApplication::runningApplicationWithProcessIdentifier(pid),
@@ -935,7 +975,11 @@ pub(crate) fn yield_focus_after_pet_click(app: &AppHandle) {
             };
             let ns_app = NSApplication::sharedApplication(mtm);
             if ns_app.isActive() {
-                ns_app.yieldActivationToApplication(&owner);
+                // yieldActivationToApplication: exists from macOS 14; earlier versions let the active
+                // app activate another one directly.
+                if ns_app.respondsToSelector(objc2::sel!(yieldActivationToApplication:)) {
+                    ns_app.yieldActivationToApplication(&owner);
+                }
                 owner.activateWithOptions(NSApplicationActivationOptions::empty());
             }
         });
@@ -1254,10 +1298,11 @@ fn is_newer(latest: &str, current: &str) -> bool {
     matches!((parse_version(latest), parse_version(current)), (Some(l), Some(c)) if l > c)
 }
 
-fn latest_manifest() -> Option<Value> {
-    let host = fetch_json(RELEASE_HOST_JSON)?;
-    let manifest_url = host["url"].as_str().filter(|u| u.starts_with(KURO_ASSETS_PREFIX))?;
-    fetch_json(manifest_url)
+fn latest_manifest() -> Result<Value, String> {
+    let host = fetch_json(RELEASE_HOST_JSON).ok_or("could not reach Kuro's release host")?;
+    let manifest_url =
+        host["url"].as_str().filter(|u| u.starts_with(KURO_ASSETS_PREFIX)).ok_or("unexpected release host data")?;
+    fetch_json(manifest_url).ok_or_else(|| "could not read Kuro's release manifest".to_string())
 }
 
 /// The clone this app was built from (set by tools/build.sh), if it is still there.
@@ -1341,23 +1386,25 @@ fn get_track_os_info() -> Value {
 /// update window, which on macOS is the rebuild notice (see open_update_window); `rid` is never used
 /// because nothing is downloaded. The endpoint from the page is ignored: only Kuro's fixed URL is fetched.
 #[tauri::command]
-async fn check_app_update(app: AppHandle, endpoint: Option<String>) -> Option<Value> {
+async fn check_app_update(app: AppHandle, endpoint: Option<String>) -> Result<Option<Value>, String> {
     let _ = endpoint;
-    let manifest = tauri::async_runtime::spawn_blocking(latest_manifest).await.ok()??;
-    let latest = manifest["version"].as_str()?.to_string();
+    // When Kuro cannot be reached this is an error, not "no update": the settings button then reports
+    // a failed check instead of "up to date" (the silent check treats errors as up to date).
+    let manifest = tauri::async_runtime::spawn_blocking(latest_manifest).await.map_err(|e| e.to_string())??;
+    let latest = manifest["version"].as_str().ok_or("manifest has no version")?.to_string();
     let current = app.package_info().version.to_string();
     if !is_newer(&latest, &current) {
-        return None;
+        return Ok(None);
     }
     log::info!("[update] Kuro released {latest} (this build: {current})");
-    Some(json!({
+    Ok(Some(json!({
         "rid": 0,
         "currentVersion": current,
         "version": latest,
         "date": manifest["pub_date"],
         "body": manifest["notes"],
         "rawJson": manifest,
-    }))
+    })))
 }
 
 /// The update window is never opened on macOS (see open_update_window), so there is no detail.
@@ -1587,6 +1634,27 @@ mod tests {
         // Same quoting as the shell would need: run it through zsh to be sure.
         let out = std::process::Command::new("/bin/zsh").arg("-c").arg(format!("print -r -- {}", r"'/Users/a b/it'\''s/wuwa'")).output().unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "/Users/a b/it's/wuwa");
+    }
+
+    #[test]
+    fn fullscreen_means_covering_a_display_exactly() {
+        use core_graphics::geometry::{CGPoint, CGRect, CGSize};
+        let r = |x, y, w, h| CGRect::new(&CGPoint::new(x, y), &CGSize::new(w, h));
+        let main = r(0.0, 0.0, 1512.0, 982.0);
+        let external = r(1512.0, -400.0, 3840.0, 2160.0);
+        assert!(super::covers(&r(0.0, 0.0, 1512.0, 982.0), &main));
+        assert!(super::covers(&r(1512.0, -400.0, 3840.0, 2160.0), &external));
+        // A big maximized window on the external display is not full screen anywhere.
+        assert!(!super::covers(&r(1512.0, -375.0, 3840.0, 2100.0), &main));
+        assert!(!super::covers(&r(1512.0, -375.0, 3840.0, 2100.0), &external));
+    }
+
+    #[test]
+    fn shortcut_bindings_are_validated() {
+        assert!(super::valid_binding(&serde_json::json!({"modifiers": 8, "key": 120})));
+        assert!(!super::valid_binding(&serde_json::Value::Null));
+        assert!(!super::valid_binding(&serde_json::json!({"modifiers": 99, "key": 120})));
+        assert!(!super::valid_binding(&serde_json::json!({"key": 120})));
     }
 
     #[test]

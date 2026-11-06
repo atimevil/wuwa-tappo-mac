@@ -66,7 +66,9 @@ fi
 
 echo "==> extracting frontend from $(basename "$EXE")"
 python3 -I tools/extract_payload.py "$EXE" "$WORK/inner.exe" "$WORK/version.txt"
-7zz x -y -o"$WORK/nsis" "$WORK/inner.exe" >/dev/null || true  # warns about the trailing signature data
+# 7zz exits 1 for warnings (the installer has data after the archive: its signature), 2+ for errors.
+SZ=0; 7zz x -y -o"$WORK/nsis" "$WORK/inner.exe" >/dev/null || SZ=$?
+[ "$SZ" -le 1 ] || { echo "could not unpack the installer (7zz exit $SZ); is it a Wuwa Tappo setup.exe?" >&2; exit 1; }
 # The main binary is WuwaTappo.exe in 1.0.0 but an unnamed entry (`$_21_`) from 1.0.3: take the largest
 # file outside the installer's own plugin folder.
 MAIN_EXE="$(find "$WORK/nsis" -type f ! -path '*/$PLUGINSDIR/*' -exec ls -S {} + | head -1)"

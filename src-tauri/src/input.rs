@@ -164,7 +164,8 @@ fn key_name(code: i64) -> String {
         96 => "F5", 97 => "F6", 98 => "F7", 99 => "F3", 100 => "F8", 101 => "F9", 103 => "F11",
         109 => "F10", 111 => "F12", 114 => "Insert", 115 => "Home", 116 => "PageUp",
         117 => "Delete", 118 => "F4", 119 => "End", 120 => "F2", 121 => "PageDown", 122 => "F1",
-        123 => "LeftArrow", 124 => "RightArrow", 125 => "DownArrow", 126 => "UpArrow",
+        105 => "F13", 107 => "F14", 113 => "F15", 106 => "F16", 64 => "F17", 79 => "F18", 80 => "F19",
+        90 => "F20", 123 => "LeftArrow", 124 => "RightArrow", 125 => "DownArrow", 126 => "UpArrow",
         _ => return format!("Unknown({code})"),
     };
     s.to_string()
@@ -216,6 +217,7 @@ mod tests {
         assert_eq!(super::windows_vk(&super::key_name(0)), Some(65));
         assert_eq!(super::windows_vk(&super::key_name(29)), Some(48));
         assert_eq!(super::windows_vk(&super::key_name(41)), Some(186));
+        assert_eq!(super::windows_vk(&super::key_name(105)), Some(124)); // F13 is bindable in Settings
         assert_eq!(super::windows_vk("ShiftLeft"), None);
         use core_graphics::event::CGEventFlags as F;
         assert_eq!(super::shortcut_modifiers(F::CGEventFlagCommand | F::CGEventFlagShift), 12);

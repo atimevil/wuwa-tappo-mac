@@ -72,7 +72,7 @@ The Windows app is a Tauri 2 app. Its frontend (Vue) is compressed inside the ex
 - **Window-open events:** some windows, such as the login window, render only after they receive an event. For those windows the host sends the event after the page has registered its listener (patch 1).
 - **Click-through and focus:** a transparent window covers the whole screen and accepts clicks only over the pet regions that the frontend reports. macOS brings a clicked app to the front, so after a click on the pet the keyboard focus is handed back to the previous app. Keystrokes typed into a game or editor right afterwards are therefore not lost.
 - **Other:**
-  - The update files are Windows installers, so the app does not install them. Where Kuro's update window would open, the app shows a notice to rebuild instead.
+  - The update files are Windows installers, so the app does not install them. Instead of Kuro's update window it shows an "Update Now" notice that rebuilds the app in Terminal (see "When a new version comes out").
   - **Shortcuts (from 1.0.3):** the shortcuts set in Settings (by default F7 game mode, F8 switch screen, F9 hide pet) are handled by the global key listener. Unlike on Windows the key is not captured, so the app in front receives it too. "Win" in Settings means the Command key on a Mac.
   - The "Show taskbar icon" setting has no effect on macOS. This app never shows a Dock icon.
   - **App log:** frontend warnings and errors go to `~/Library/Logs/io.github.atimevil.wuwatappo-mac/`, except one pair: the `invalid key: #device_id` warning and the format warning after it, which Kuro's analytics produces on every event. Kuro's own analytics SDK objects to the `#` in the name; the event is still sent.
@@ -81,7 +81,9 @@ The Windows app is a Tauri 2 app. Its frontend (Vue) is compressed inside the ex
 
 ## When a new version comes out
 
-The macOS app does not update itself, because Kuro's update files are Windows installers. Instead, the app checks Kuro's release manifest at startup, every 30 minutes, and when you click "Check for updates" in Settings. When a newer version exists, it shows a notice at every launch until you rebuild. Run `tools/build.sh` again then to rebuild with the latest installer. Until then the existing app keeps working for as long as the server accepts it.
+Kuro's update files are Windows installers, so they cannot be installed as is. Instead, the app checks Kuro's release manifest at startup, every 30 minutes, and when you click "Check for updates" in Settings. When a newer version exists, it shows a notice at every launch until you rebuild.
+
+Click **Update Now** in the notice to open a Terminal window. In the repository folder the app was built from, it runs `git pull` to get the latest version of this port and then `tools/build.sh`. This takes a few minutes; when it finishes, the new version is installed and the app restarts. If you moved or deleted the repository folder, the button becomes "Open GitHub"; then run `tools/build.sh` from your clone yourself. Until you update, the existing app keeps working for as long as the server accepts it.
 
 The patches locate their targets with regular expressions that tolerate renamed minified identifiers, so most new versions build as is. If a patch reports "NOT FOUND" or the contract check fails, the structure of the frontend code has changed. Update the patterns in `tools/patch_frontend.py` and the command list in `src-tauri/src/lib.rs` to match the new version.
 

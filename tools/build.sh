@@ -94,7 +94,8 @@ iconutil -c icns "$WORK/icon.iconset" -o "$ICONS/icon.icns"
 echo "==> building"
 # The app reports the installer's version (to Kuro's API, and for the update notice).
 VERSION="$(cat "$WORK/version.txt" 2>/dev/null || echo 1.0.0)"
-(cd src-tauri && cargo tauri build --bundles app --config "{\"version\":\"$VERSION\"}")
+# The update notice's "Update now" button reruns this script from this clone.
+(cd src-tauri && WUWA_REPO_DIR="$ROOT" cargo tauri build --bundles app --config "{\"version\":\"$VERSION\"}")
 APP="src-tauri/target/release/bundle/macos/Wuwa Tappo.app"
 
 BUNDLE_ID=io.github.atimevil.wuwatappo-mac

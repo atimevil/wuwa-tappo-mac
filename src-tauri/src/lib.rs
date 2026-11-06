@@ -1073,6 +1073,65 @@ fn permission_text(locale: &str) -> [&'static str; 4] {
     }
 }
 
+/// [body with {latest}/{current}, button] when the app can rebuild itself from its clone.
+fn update_now_text(locale: &str) -> [&'static str; 2] {
+    match locale {
+        "kr" => [
+            "Wuwa Tappo {latest}이(가) 나왔습니다. 지금 앱은 {current}입니다.\n\n\
+             '지금 업데이트'를 누르면 터미널 창에서 새 버전을 받아 다시 빌드하고 설치합니다. \
+             몇 분 걸리며, 끝나면 앱이 다시 켜집니다.",
+            "지금 업데이트",
+        ],
+        "jp" => [
+            "Wuwa Tappo {latest} が公開されました。現在のアプリは {current} です。\n\n\
+             「今すぐ更新」を押すと、ターミナルで新しいバージョンをダウンロードしてビルドし直し、インストールします。\
+             数分かかり、終わるとアプリが再起動します。",
+            "今すぐ更新",
+        ],
+        "tw" => [
+            "Wuwa Tappo {latest} 已推出，目前的 App 為 {current}。\n\n\
+             按「立即更新」後，會在終端機視窗中下載並重新建置、安裝新版本。需要幾分鐘，完成後 App 會重新啟動。",
+            "立即更新",
+        ],
+        "fr" => [
+            "Wuwa Tappo {latest} est sorti. Cette app est en version {current}.\n\n\
+             Cliquez sur « Mettre à jour » pour télécharger, recompiler et installer la nouvelle version \
+             dans une fenêtre du Terminal. Cela prend quelques minutes, puis l'app redémarre.",
+            "Mettre à jour",
+        ],
+        "de" => [
+            "Wuwa Tappo {latest} ist erschienen. Diese App ist Version {current}.\n\n\
+             Klicke auf „Jetzt aktualisieren“, um die neue Version in einem Terminal-Fenster herunterzuladen, \
+             neu zu bauen und zu installieren. Das dauert einige Minuten; danach startet die App neu.",
+            "Jetzt aktualisieren",
+        ],
+        "es" => [
+            "Ya está disponible Wuwa Tappo {latest}. Esta app es la versión {current}.\n\n\
+             Haz clic en «Actualizar ahora» para descargar, compilar e instalar la nueva versión en una \
+             ventana de Terminal. Tarda unos minutos y la app se reinicia al terminar.",
+            "Actualizar ahora",
+        ],
+        "pt" => [
+            "O Wuwa Tappo {latest} foi lançado. Este app está na versão {current}.\n\n\
+             Clique em \"Atualizar agora\" para baixar, compilar e instalar a nova versão em uma janela do \
+             Terminal. Leva alguns minutos, e o app reinicia ao terminar.",
+            "Atualizar agora",
+        ],
+        "th" => [
+            "Wuwa Tappo {latest} เปิดตัวแล้ว แอปนี้เป็นเวอร์ชัน {current}\n\n\
+             คลิก \"อัปเดตเลย\" เพื่อดาวน์โหลด บิลด์ และติดตั้งเวอร์ชันใหม่ในหน้าต่าง Terminal \
+             ใช้เวลาสักครู่ และแอปจะรีสตาร์ทเมื่อเสร็จ",
+            "อัปเดตเลย",
+        ],
+        _ => [
+            "Wuwa Tappo {latest} has been released. This app is {current}.\n\n\
+             Click 'Update Now' to download, rebuild and install the new version in a Terminal window. \
+             It takes a few minutes, and the app restarts when it is done.",
+            "Update Now",
+        ],
+    }
+}
+
 /// [title, body with {latest}/{current}, open button, close button]
 fn update_text(locale: &str) -> [&'static str; 4] {
     match locale {
@@ -1201,11 +1260,59 @@ fn latest_manifest() -> Option<Value> {
     fetch_json(manifest_url)
 }
 
+/// The clone this app was built from (set by tools/build.sh), if it is still there.
+fn local_repo() -> Option<PathBuf> {
+    option_env!("WUWA_REPO_DIR").map(PathBuf::from).filter(|p| p.join("tools/build.sh").is_file())
+}
+
+/// Terminal script for "Update now": pull the port, then build.sh downloads Kuro's latest
+/// installer, rebuilds, reinstalls and relaunches the app (it quits this one first).
+fn update_script(repo: &std::path::Path) -> String {
+    let quoted = format!("'{}'", repo.display().to_string().replace('\'', r"'\''"));
+    format!(
+        r#"#!/bin/zsh -l
+cd {quoted} || exit 1
+export PATH="/opt/homebrew/opt/rustup/bin:/usr/local/opt/rustup/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+echo "==> updating the macOS port (git pull)"
+git pull --ff-only || echo "git pull failed; building with the current checkout"
+tools/build.sh
+rc=$?
+echo
+if [ $rc = 0 ]; then echo "Update finished. You can close this window."; else echo "Update failed (exit $rc). See the messages above."; fi
+"#
+    )
+}
+
+fn start_update(repo: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let path = std::env::temp_dir().join("wuwa-tappo-update.command");
+    std::fs::write(&path, update_script(repo))?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+    // `open` hands a .command file to Terminal, so the build runs outside this (soon replaced) app.
+    std::process::Command::new("open").arg(&path).status().map(|_| ())
+}
+
 fn show_rebuild_notice(app: &AppHandle, latest: &str, current: &str) {
-    let [title, body, open, close] = update_text(&ui_locale(app));
+    let locale = ui_locale(app);
+    let [title, mut body, mut open, close] = update_text(&locale);
+    let repo = local_repo();
+    if repo.is_some() {
+        [body, open] = update_now_text(&locale);
+    }
     let body = body.replace("{latest}", latest).replace("{current}", current);
-    if front_dialog(app, title, &body, open, close) {
-        let _ = std::process::Command::new("open").arg(REPO_URL).status();
+    if !front_dialog(app, title, &body, open, close) {
+        return;
+    }
+    match repo {
+        Some(repo) => {
+            if let Err(e) = start_update(&repo) {
+                log::error!("[update] could not start the update: {e}");
+                let _ = std::process::Command::new("open").arg(REPO_URL).status();
+            }
+        }
+        None => {
+            let _ = std::process::Command::new("open").arg(REPO_URL).status();
+        }
     }
 }
 
@@ -1473,12 +1580,41 @@ mod tests {
     }
 
     #[test]
+    fn update_script_quotes_the_repo_path() {
+        let s = super::update_script(std::path::Path::new("/Users/a b/it's/wuwa"));
+        assert!(s.contains(r"cd '/Users/a b/it'\''s/wuwa' || exit 1"), "{s}");
+        assert!(s.contains("\ntools/build.sh\n"));
+        // Same quoting as the shell would need: run it through zsh to be sure.
+        let out = std::process::Command::new("/bin/zsh").arg("-c").arg(format!("print -r -- {}", r"'/Users/a b/it'\''s/wuwa'")).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "/Users/a b/it's/wuwa");
+    }
+
+    #[test]
+    fn update_script_runs_and_reports_the_result() {
+        // A fake clone (not a git repo, so the pull fails and the build still runs) whose build.sh exits 3.
+        let dir = std::env::temp_dir().join(format!("wuwa-update-test-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("tools")).unwrap();
+        std::fs::write(dir.join("tools/build.sh"), "#!/bin/sh\necho fake-build\nexit 3\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.join("tools/build.sh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let script = dir.join("update.command");
+        std::fs::write(&script, super::update_script(&dir)).unwrap();
+        let out = std::process::Command::new("/bin/zsh").arg(&script).output().unwrap();
+        let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(text.contains("fake-build") && text.contains("Update failed (exit 3)"), "{text}");
+    }
+
+    #[test]
     fn dialogs_cover_every_app_language() {
         // The frontend's GLOBAL_LOCALE_OPTIONS.
         for l in ["tw", "jp", "kr", "fr", "de", "es", "pt", "th"] {
             assert_ne!(super::permission_text(l), super::permission_text("en"), "{l}");
             assert_ne!(super::update_text(l), super::update_text("en"), "{l}");
             assert!(super::update_text(l)[1].contains("{latest}") && super::update_text(l)[1].contains("{current}"), "{l}");
+            assert_ne!(super::update_now_text(l), super::update_now_text("en"), "{l}");
+            assert!(super::update_now_text(l)[0].contains("{latest}") && super::update_now_text(l)[0].contains("{current}"), "{l}");
+            assert!(super::update_now_text(l)[0].contains(super::update_now_text(l)[1]), "{l}: body names its button");
         }
         assert_eq!(super::locale_from_system("ko-KR"), "kr");
         assert_eq!(super::locale_from_system("zh-Hant-TW"), "tw");

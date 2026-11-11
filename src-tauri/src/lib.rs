@@ -1310,7 +1310,8 @@ fn local_repo() -> Option<PathBuf> {
     option_env!("WUWA_REPO_DIR").map(PathBuf::from).filter(|p| p.join("tools/build.sh").is_file())
 }
 
-/// Terminal script for "Update now": pull the port, then build.sh downloads Kuro's latest
+/// Terminal script for "Update now": pull the port (rebasing any local commits on top, so a clone
+/// with its own changes keeps them), then build.sh downloads Kuro's latest
 /// installer, rebuilds, reinstalls and relaunches the app (it quits this one first).
 fn update_script(repo: &std::path::Path) -> String {
     let quoted = format!("'{}'", repo.display().to_string().replace('\'', r"'\''"));
@@ -1319,7 +1320,7 @@ fn update_script(repo: &std::path::Path) -> String {
 cd {quoted} || exit 1
 export PATH="/opt/homebrew/opt/rustup/bin:/usr/local/opt/rustup/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 echo "==> updating the macOS port (git pull)"
-git pull --ff-only || echo "git pull failed; building with the current checkout"
+git pull --rebase --autostash || {{ git rebase --abort 2>/dev/null; echo "git pull failed; building with the current checkout"; }}
 tools/build.sh
 rc=$?
 echo

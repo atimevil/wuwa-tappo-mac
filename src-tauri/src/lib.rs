@@ -569,15 +569,19 @@ fn shortcuts(app: &AppHandle) -> Value {
     let mut cache = SHORTCUTS.lock().unwrap();
     cache
         .get_or_insert_with(|| {
-            // Defaults as in the frontend's DEFAULT_APP_SHORTCUTS: F7, F8, F9.
+            // Defaults as in the frontend's DEFAULT_APP_SHORTCUTS (F7, F8, F9; the 1.0.5 actions unbound).
+            // The settings page reads every action's binding, so each must be present.
             let mut v = json!({
                 "gameMode": { "modifiers": 0, "key": 118 },
                 "switchScreen": { "modifiers": 0, "key": 119 },
                 "togglePet": { "modifiers": 0, "key": 120 },
+                "alwaysOnTop": { "modifiers": 0, "key": 0 },
+                "autoGameModeOnFullscreen": { "modifiers": 0, "key": 0 },
+                "disablePointerMonitoring": { "modifiers": 0, "key": 0 },
             });
             if let Some(saved) = read_store(app)["shortcuts"].as_object() {
                 for (k, b) in saved {
-                    if v.get(k).is_some() && valid_binding(b) {
+                    if valid_action(k) && valid_binding(b) {
                         v[k] = b.clone();
                     }
                 }
@@ -591,6 +595,11 @@ fn binding(b: &Value) -> (u64, u64) {
     (b["modifiers"].as_u64().unwrap_or(0), b["key"].as_u64().unwrap_or(0))
 }
 
+/// Action names come from the frontend; later versions may add more, so accept any plain name.
+fn valid_action(name: &str) -> bool {
+    (1..=48).contains(&name.len()) && name.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
 fn valid_binding(b: &Value) -> bool {
     matches!((b["modifiers"].as_u64(), b["key"].as_u64()), (Some(m), Some(k)) if m <= 15 && k <= 255)
 }
@@ -602,17 +611,23 @@ fn get_app_shortcuts(app: AppHandle) -> Value {
 
 #[tauri::command]
 fn set_app_shortcuts(app: AppHandle, config: Value) -> Result<(), String> {
-    // Keep only the known actions, each a {modifiers, key} pair (key 0 = unbound).
-    let current = shortcuts(&app);
-    let mut clean = serde_json::Map::new();
+    // Every action is a {modifiers, key} pair (key 0 = unbound); actions the page leaves out keep
+    // their current binding.
+    let sent = config.as_object().ok_or("unavailable")?;
+    let mut clean = shortcuts(&app).as_object().cloned().unwrap_or_default();
+    for (action, b) in sent {
+        if !valid_action(action) || !valid_binding(b) || sent.len() > 32 {
+            return Err("unavailable".into());
+        }
+        let (m, k) = binding(b);
+        clean.insert(action.clone(), json!({ "modifiers": m, "key": k }));
+    }
     let mut seen = std::collections::HashSet::new();
-    for action in current.as_object().into_iter().flat_map(|m| m.keys()) {
-        let b = config.get(action).filter(|b| valid_binding(b)).ok_or("unavailable")?;
+    for b in clean.values() {
         let (m, k) = binding(b);
         if k != 0 && !seen.insert((m, k)) {
             return Err("duplicate".into());
         }
-        clean.insert(action.clone(), json!({ "modifiers": m, "key": k }));
     }
     update_store(&app, |v| v["shortcuts"] = Value::Object(clean))?;
     *SHORTCUTS.lock().unwrap() = None;
@@ -1787,6 +1802,8 @@ mod tests {
         assert!(!super::valid_binding(&serde_json::Value::Null));
         assert!(!super::valid_binding(&serde_json::json!({"modifiers": 99, "key": 120})));
         assert!(!super::valid_binding(&serde_json::json!({"key": 120})));
+        assert!(super::valid_action("disablePointerMonitoring"));
+        assert!(!super::valid_action("") && !super::valid_action("a b") && !super::valid_action("__proto__"));
     }
 
     #[test]

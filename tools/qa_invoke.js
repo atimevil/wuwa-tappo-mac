@@ -49,7 +49,7 @@
     await check('get_boot_diagnostics', () => inv('get_boot_diagnostics'), (v) => v === null);
     await check('ensure_main_taskbar_icon', () => inv('ensure_main_taskbar_icon'));
     await check('set_main_skip_taskbar', () => inv('set_main_skip_taskbar', { skip: false }));
-    const sc = await check('get_app_shortcuts', () => inv('get_app_shortcuts'), (v) => ['gameMode', 'switchScreen', 'togglePet'].every((k) => Number.isFinite(v[k]?.key)));
+    const sc = await check('get_app_shortcuts', () => inv('get_app_shortcuts'), (v) => ['gameMode', 'switchScreen', 'togglePet', 'alwaysOnTop', 'autoGameModeOnFullscreen', 'disablePointerMonitoring'].every((k) => Number.isFinite(v[k]?.key)));
     if (sc) {
       await check('set_app_shortcuts (duplicate rejected)', () => inv('set_app_shortcuts', { config: { ...sc, gameMode: sc.togglePet } }).then(() => 'accepted', (e) => String(e)), (v) => v === 'duplicate');
       await check('set_app_shortcuts (same config)', () => inv('set_app_shortcuts', { config: sc }));

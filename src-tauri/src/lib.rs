@@ -468,6 +468,13 @@ fn show_toast_overlay(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn hide_toast_overlay(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("toast") {
+        let _ = w.hide();
+    }
+}
+
+#[tauri::command]
 fn sync_aux_windows_to_main_monitor(app: AppHandle) -> Result<(), String> {
     if let (Some(w), Ok(m)) = (app.get_webview_window("toast"), main_monitor(&app)) {
         cover_monitor(&w, &m).map_err(|e| e.to_string())?;
@@ -491,9 +498,17 @@ fn apply_main_window_position(app: AppHandle, payload: PositionPayload) -> Resul
 }
 
 #[tauri::command]
-fn set_main_window_fullscreen_shell(app: AppHandle) -> Result<(), String> {
+fn set_main_window_fullscreen_shell(app: AppHandle, payload: Option<Value>) -> Result<(), String> {
     let w = main_window(&app)?;
-    cover_monitor(&w, &main_monitor(&app)?).map_err(|e| e.to_string())?;
+    // 1.0.5+ may pass the target monitor's physical bounds; without them, cover the pet's monitor.
+    let bounds = payload.and_then(|p| Some((p["x"].as_f64()?, p["y"].as_f64()?, p["width"].as_f64()?, p["height"].as_f64()?)));
+    match bounds {
+        Some((x, y, width, height)) if width > 0.0 && height > 0.0 => {
+            w.set_position(tauri::PhysicalPosition::new(x.round() as i32, y.round() as i32)).map_err(|e| e.to_string())?;
+            w.set_size(tauri::PhysicalSize::new(width.round() as u32, height.round() as u32)).map_err(|e| e.to_string())?;
+        }
+        _ => cover_monitor(&w, &main_monitor(&app)?).map_err(|e| e.to_string())?,
+    }
     refresh_geometry(&app);
     Ok(())
 }
@@ -919,6 +934,98 @@ fn load_cumulative_click_count(app: AppHandle, environment: String) -> Value {
         return json!({ "count": 0, "cuid": "", "environment": "" });
     }
     json!({ "count": e["count"].as_u64().unwrap_or(0), "cuid": e["cuid"].as_str().unwrap_or(""), "environment": environment })
+}
+
+// ---------- reset local data (1.0.5+) ----------
+// Settings → clear cache. As in the Windows build: keep the click totals in a reset archive, drop the
+// other local settings, turn off launch at login, clear the web data (this signs out) and restart.
+// After the next login the frontend reads the archive back (load_reset_click_archive).
+
+fn click_count(v: f64) -> u64 {
+    if v.is_finite() && v > 0.0 { v.min(u64::MAX as f64) as u64 } else { 0 }
+}
+
+/// The store kept across a reset: key-press counts (local clicks not yet synced) and the archive.
+fn reset_store(old: &Value, environment: &str, local_count: f64, cumulative_count: Option<f64>, cuid: &str) -> Value {
+    let mut key_press = old["key_press"].clone();
+    if !key_press.is_object() {
+        key_press = json!({});
+    }
+    let kept = key_press[environment].as_u64().unwrap_or(0).max(click_count(local_count));
+    key_press[environment] = json!(kept);
+
+    let same_account = |e: &Value| e["cuid"].as_str().map_or(true, |c| c.is_empty() || cuid.is_empty() || c == cuid);
+    let earlier = |e: &Value| if same_account(e) { e["count"].as_u64().unwrap_or(0) } else { 0 };
+    let total = cumulative_count
+        .map(click_count)
+        .unwrap_or(0)
+        .max(earlier(&old["reset_click_archive"][environment]))
+        .max(earlier(&old["cumulative_click"][environment]));
+    let mut archive = old["reset_click_archive"].clone();
+    if !archive.is_object() {
+        archive = json!({});
+    }
+    archive[environment] = json!({ "count": total, "cuid": cuid });
+    json!({ "key_press": key_press, "reset_click_archive": archive })
+}
+
+#[tauri::command]
+fn load_reset_click_archive(app: AppHandle, environment: String, cuid: String) -> u64 {
+    let e = &read_store(&app)["reset_click_archive"][&environment];
+    let owner = e["cuid"].as_str().unwrap_or("");
+    if owner.is_empty() || owner == cuid { e["count"].as_u64().unwrap_or(0) } else { 0 }
+}
+
+#[tauri::command]
+fn reset_local_data(
+    app: AppHandle,
+    environment: String,
+    local_count: f64,
+    cumulative_count: Option<f64>,
+    cuid: String,
+    failure_message: String,
+) -> Result<(), String> {
+    let result = (|| -> Result<(), String> {
+        if environment.is_empty() || !environment.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            return Err(format!("invalid environment {environment:?}"));
+        }
+        let fresh = reset_store(&read_store(&app), &environment, local_count, cumulative_count, &cuid);
+        update_store(&app, |v| *v = fresh)?;
+        *SHORTCUTS.lock().unwrap() = None;
+        #[cfg(not(debug_assertions))]
+        {
+            use tauri_plugin_autostart::ManagerExt;
+            let _ = app.autolaunch().disable();
+        }
+        for w in app.webview_windows().values() {
+            w.clear_all_browsing_data().map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })();
+    if let Err(e) = result {
+        log::error!("[reset] local data reset failed: {e}");
+        let handle = app.clone();
+        std::thread::spawn(move || {
+            use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+            handle.dialog().message(failure_message).kind(MessageDialogKind::Error).title("Wuwa Tappo").blocking_show();
+        });
+        return Err(e);
+    }
+    log::info!("[reset] local data cleared; restarting");
+    app.restart()
+}
+
+/// The Windows build runs DNS/HTTP probes here; on macOS the frontend falls back to its own checks.
+#[tauri::command]
+fn run_network_diagnostics(
+    region: Option<String>,
+    api_base: Option<String>,
+    assets_host: Option<String>,
+    pre_release: Option<bool>,
+    run_id: Option<String>,
+) -> Value {
+    let _ = (region, api_base, assets_host, pre_release, run_id);
+    json!({ "status": "unsupported" })
 }
 
 #[tauri::command]
@@ -1582,6 +1689,10 @@ pub fn run() {
             sync_main_window_to_current_monitor,
             finish_main_window_monitor_switch,
             ensure_main_taskbar_icon,
+            hide_toast_overlay,
+            load_reset_click_archive,
+            reset_local_data,
+            run_network_diagnostics,
             set_main_skip_taskbar,
             get_app_shortcuts,
             set_app_shortcuts,
@@ -1648,6 +1759,26 @@ mod tests {
         // A big maximized window on the external display is not full screen anywhere.
         assert!(!super::covers(&r(1512.0, -375.0, 3840.0, 2100.0), &main));
         assert!(!super::covers(&r(1512.0, -375.0, 3840.0, 2100.0), &external));
+    }
+
+    #[test]
+    fn reset_keeps_click_totals_per_account() {
+        use serde_json::json;
+        let old = json!({
+            "key_press": { "env": 40, "other": 7 },
+            "cumulative_click": { "env": { "count": 900, "cuid": "a" } },
+            "reset_click_archive": { "env": { "count": 1000, "cuid": "a" } },
+            "shortcuts": { "togglePet": { "modifiers": 0, "key": 120 } },
+            "locale": "kr",
+        });
+        let s = super::reset_store(&old, "env", 55.0, Some(950.0), "a");
+        assert_eq!(s["key_press"], json!({ "env": 55, "other": 7 }));
+        assert_eq!(s["reset_click_archive"]["env"], json!({ "count": 1000, "cuid": "a" }));
+        assert!(s.get("shortcuts").is_none() && s.get("locale").is_none());
+        // Another account does not inherit account a's total.
+        let s = super::reset_store(&old, "env", 0.0, None, "b");
+        assert_eq!(s["reset_click_archive"]["env"], json!({ "count": 0, "cuid": "b" }));
+        assert_eq!(super::click_count(f64::NAN), 0);
     }
 
     #[test]

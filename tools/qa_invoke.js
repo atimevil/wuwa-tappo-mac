@@ -1,6 +1,7 @@
 // Runtime QA: injected into the main window of a debug build (WUWA_QA_SCRIPT=tools/qa_invoke.js).
 // Calls every host command with the argument shapes the frontend uses and logs `[QA] PASS|FAIL`.
-// Skipped on purpose: open_update_window (shows the modal rebuild notice), exit_app, hide_main_after_maintenance_notice_ready, open_maintenance_notice
+// Skipped on purpose: open_update_window (shows the modal rebuild notice), reset_local_data (signs out
+// and restarts), exit_app, hide_main_after_maintenance_notice_ready, open_maintenance_notice
 // (they quit or hide the pet) and popup_main_dock_context_menu (a modal menu; covered by the UI pass).
 (() => {
   if (window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label !== 'main') return;
@@ -54,6 +55,9 @@
       await check('set_app_shortcuts (same config)', () => inv('set_app_shortcuts', { config: sc }));
       await check('get_app_shortcuts (round trip)', () => inv('get_app_shortcuts'), (v) => JSON.stringify(v) === JSON.stringify(sc));
     }
+    await check('hide_toast_overlay', () => inv('hide_toast_overlay'));
+    await check('load_reset_click_archive', () => inv('load_reset_click_archive', { environment: env, cuid: 'qa-no-such-account' }), Number.isFinite);
+    await check('run_network_diagnostics', () => inv('run_network_diagnostics', { region: 'global', apiBase: 'https://example.invalid', assetsHost: null, preRelease: false, runId: 'qa' }), (v) => v.status === 'unsupported');
     await check('set_shortcut_capture on', () => inv('set_shortcut_capture', { active: true }));
     await check('set_shortcut_capture off', () => inv('set_shortcut_capture', { active: false }));
     await check('apply_main_window_position', () => inv('apply_main_window_position', { payload: { alwaysOnTop: true, position: 'bottomRight', applyPosition: false } }));
